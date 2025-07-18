@@ -46,7 +46,7 @@ import {
   updateDoc
 } from "firebase/firestore";
 import { db } from "../../lib/firebase";
-import { Search, Plus, Package, Share2, History, Users, ArrowRight, Edit, Filter, Calendar } from "lucide-react";
+import { Search, Plus, Package, Share2, History, Users, ArrowRight, Edit, Filter, Calendar, ArrowUpDown } from "lucide-react";
 import { format } from "date-fns";
 import { Calendar as CalendarComponent } from "../ui/calendar";
 
@@ -69,6 +69,7 @@ export function ReleaseSupply() {
     todayReleases: 0,
     uniqueRecipients: 0
   });
+  const [sortOrder, setSortOrder] = useState('asc');
 
   const [newRelease, setNewRelease] = useState({
     supplyId: "",
@@ -128,6 +129,7 @@ export function ReleaseSupply() {
     if (searchTerm.trim()) {
       const searchLower = searchTerm.toLowerCase();
       filtered = filtered.filter(release => 
+        release.id.toLowerCase().includes(searchLower) || 
         release.supplyName.toLowerCase().includes(searchLower) || 
         release.receivedBy.toLowerCase().includes(searchLower) ||
         release.department.toLowerCase().includes(searchLower)
@@ -145,9 +147,23 @@ export function ReleaseSupply() {
         return releaseDate >= startOfDay && releaseDate <= endOfDay;
       });
     }
-    
+
+    // Sort the filtered releases by supply name
+    filtered = [...filtered].sort((a, b) => {
+      const nameA = (a.supplyName || '').charAt(0).toLowerCase();
+      const nameB = (b.supplyName || '').charAt(0).toLowerCase();
+      return sortOrder === 'asc' 
+        ? nameA.localeCompare(nameB)
+        : nameB.localeCompare(nameA);
+    });
+
     setFilteredReleases(filtered);
-  }, [searchTerm, allReleases, selectedDate]);
+  }, [searchTerm, allReleases, selectedDate, sortOrder]);
+
+  // Add toggle sort function
+  const toggleSort = () => {
+    setSortOrder(current => current === 'asc' ? 'desc' : 'asc');
+  };
 
   const handleAddRelease = async (e) => {
     e.preventDefault();
@@ -474,6 +490,7 @@ export function ReleaseSupply() {
       {/* Table Section */}
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg mt-8">
         <div className="p-6 border-b border-gray-200 dark:border-gray-700">
+          {/* Search and Filter Section */}
           <div className="flex justify-between items-center gap-4">
             <div className="relative flex-1 max-w-md">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
@@ -485,6 +502,18 @@ export function ReleaseSupply() {
               />
             </div>
             <div className="flex items-center gap-4">
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={toggleSort}
+                className={cn(
+                  "h-10 w-10",
+                  sortOrder === 'desc' && "bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800"
+                )}
+              >
+                <ArrowUpDown className="h-4 w-4" />
+              </Button>
+
               <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
                 <PopoverTrigger asChild>
                   <Button variant="outline" className="gap-2">
@@ -521,6 +550,7 @@ export function ReleaseSupply() {
               <div className="text-sm text-gray-500 dark:text-gray-400">
                 Showing {filteredReleases.length} releases
                 {selectedDate && ` for ${format(selectedDate, 'PP')}`}
+                {` (${sortOrder === 'asc' ? 'A-Z' : 'Z-A'})`}
               </div>
             </div>
           </div>

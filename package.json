@@ -30,6 +30,8 @@
     "cmdk": "^1.1.1",
     "date-fns": "^4.1.0",
     "firebase": "^11.10.0",
+    "jspdf": "^3.0.1",
+    "jspdf-autotable": "^5.0.2",
     "lucide": "^0.525.0",
     "lucide-react": "^0.525.0",
     "motion": "^12.23.6",
@@ -42,7 +44,8 @@
     "recharts": "^2.15.4",
     "sonner": "^2.0.6",
     "tailwind-merge": "^3.3.1",
-    "tailwindcss": "^4.1.11"
+    "tailwindcss": "^4.1.11",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@eslint/js": "^9.30.1",

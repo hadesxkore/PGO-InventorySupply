@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
+import * as XLSX from 'xlsx';
 import { 
   Table, 
   TableBody, 
@@ -53,10 +54,28 @@ import {
   clusters
 } from "../../lib/firebase";
 import { collection, onSnapshot, query, orderBy, where, addDoc } from "firebase/firestore";
-import { Search, Plus, Pencil, Trash2, Package, Boxes, AlertTriangle, XCircle, Calendar } from "lucide-react";
+import { Search, Plus, Pencil, Trash2, Package, Boxes, AlertTriangle, XCircle, Calendar, ArrowUpDown } from "lucide-react";
 import { format } from "date-fns";
 import { Calendar as CalendarComponent } from "../ui/calendar";
 import { Skeleton } from "../ui/skeleton";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "../ui/pagination";
+import React from "react"; // Added missing import for React
+import { cn } from "@/lib/utils"; // Added missing import for cn
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../ui/dropdown-menu";
+import { Filter } from "lucide-react";
 
 export function SuppliesStock() {
   const [allSupplies, setAllSupplies] = useState([]); // Store all supplies
@@ -73,6 +92,7 @@ export function SuppliesStock() {
   const [newUnit, setNewUnit] = useState("");
   const [selectedDate, setSelectedDate] = useState(null);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [newSupply, setNewSupply] = useState({
     name: "",
     quantity: "",
@@ -89,6 +109,21 @@ export function SuppliesStock() {
     cluster: "", // Add cluster to edit state
   });
   const [isLoading, setIsLoading] = useState(true);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 15; // Changed from 20 to 15
+  const [sortOrder, setSortOrder] = useState('asc'); // Add sort order state
+  const [stockFilter, setStockFilter] = useState('all'); // Add stock filter state
+
+  // Calculate pagination values
+  const totalPages = Math.ceil(filteredSupplies.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const currentSupplies = filteredSupplies.slice(startIndex, endIndex);
+
+  // Reset to first page when search changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, selectedDate]);
 
   // Fetch units from Firebase
   useEffect(() => {
@@ -153,9 +188,30 @@ export function SuppliesStock() {
         return supplyDate >= startOfDay && supplyDate <= endOfDay;
       });
     }
+
+    // Apply stock filter
+    switch (stockFilter) {
+      case 'low':
+        filtered = filtered.filter(supply => supply.quantity > 0 && supply.quantity < 10);
+        break;
+      case 'out':
+        filtered = filtered.filter(supply => supply.quantity === 0);
+        break;
+      default:
+        break;
+    }
+
+    // Sort the filtered supplies
+    filtered = [...filtered].sort((a, b) => {
+      const nameA = a.name.charAt(0).toLowerCase();
+      const nameB = b.name.charAt(0).toLowerCase();
+      return sortOrder === 'asc' 
+        ? nameA.localeCompare(nameB)
+        : nameB.localeCompare(nameA);
+    });
     
     setFilteredSupplies(filtered);
-  }, [searchTerm, allSupplies, selectedDate]);
+  }, [searchTerm, allSupplies, selectedDate, sortOrder, stockFilter]); // Add stockFilter to dependencies
 
   const handleImageChange = (e) => {
     const file = e.target.files[0];
@@ -271,6 +327,64 @@ export function SuppliesStock() {
     }
   };
 
+  const handleImportExcel = async (e) => {
+    const file = e.target.files[0];
+    setLoading(true);
+    
+    try {
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data);
+      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+      
+      // Convert to array of arrays to get raw data
+      const rawData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+      
+      // Skip the first two rows (empty and "Item" header) and process only column A
+      const items = rawData.slice(2).map(row => row[0]).filter(Boolean);
+      
+      let importCount = 0;
+      
+      for (const itemName of items) {
+        if (itemName && typeof itemName === 'string') {
+          const trimmedName = itemName.trim();
+          
+          // Check if item already exists
+          const existingItems = allSupplies.filter(supply => 
+            supply.name.toLowerCase() === trimmedName.toLowerCase()
+          );
+
+          if (existingItems.length === 0) {
+            try {
+              await addSupply({
+                name: trimmedName,
+                quantity: 0, // Default quantity
+                unit: "pcs", // Default unit
+                cluster: "GEN", // Default cluster
+                image: "", // No image by default
+                dateAdded: new Date(), // Add current date
+              });
+              importCount++;
+            } catch (error) {
+              console.error("Error adding item:", trimmedName, error);
+            }
+          }
+        }
+      }
+
+      setImportDialogOpen(false);
+      if (importCount > 0) {
+        toast.success(`Successfully imported ${importCount} new items`);
+      } else {
+        toast.info("No new items were imported (items may already exist)");
+      }
+    } catch (error) {
+      console.error("Error importing Excel:", error);
+      toast.error("Failed to import Excel data: " + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Helper function to format date
   const formatDate = (timestamp) => {
     if (!timestamp) return '-';
@@ -284,6 +398,11 @@ export function SuppliesStock() {
     return new Date(timestamp).toLocaleString();
   };
 
+  // Add toggle sort function
+  const toggleSort = () => {
+    setSortOrder(current => current === 'asc' ? 'desc' : 'asc');
+  };
+
   return (
     <div className="p-6 max-w-[1800px] mx-auto">
       {/* Header Section */}
@@ -292,426 +411,569 @@ export function SuppliesStock() {
           <h1 className="text-2xl font-bold text-gray-800 dark:text-white">
             Supplies & Stock
           </h1>
-          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-            <DialogTrigger asChild>
-              <Button size="lg" className="gap-2">
-                <Plus className="w-4 h-4" />
-                Add Supply
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-[900px] p-0 gap-0">
-              <div className="grid grid-cols-5 min-h-[600px]">
-                {/* Left Column - Image Preview/Upload */}
-                <div className="col-span-2 bg-gray-50 dark:bg-gray-900/50 p-6 flex flex-col gap-4 border-r border-gray-200 dark:border-gray-800">
-                  <div className="flex-1 flex flex-col gap-4">
-                    <div className="text-sm font-medium text-gray-600 dark:text-gray-400">Supply Image</div>
-                    <div className="relative flex-1 flex flex-col items-center justify-center border-2 border-dashed border-gray-200 dark:border-gray-800 rounded-xl bg-white dark:bg-gray-900/30 overflow-hidden group">
-                      {selectedImage ? (
-                        <>
-                          <img
-                            src={URL.createObjectURL(selectedImage)}
-                            alt="Preview"
-                            className="w-full h-full object-cover"
-                          />
-                          <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="text-white border-white hover:text-white"
-                              onClick={() => setSelectedImage(null)}
-                            >
-                              Change Image
-                            </Button>
-                          </div>
-                        </>
-                      ) : (
-                        <label className="flex-1 w-full h-full flex flex-col items-center justify-center cursor-pointer">
-                          <div className="rounded-full bg-gray-100 dark:bg-gray-800 p-4 mb-4">
-                            <Package className="w-8 h-8 text-gray-400" />
-                          </div>
-                          <div className="text-sm font-medium mb-1">Drop your image here</div>
-                          <div className="text-xs text-gray-500 mb-4">or click to browse</div>
-                          <Input
-                            type="file"
-                            accept="image/*"
-                            className="hidden"
-                            onChange={handleImageChange}
-                          />
-                        </label>
-                      )}
-                    </div>
-                  </div>
-                  <div className="text-xs text-gray-500 text-center">
-                    Supported formats: JPEG, PNG, GIF
-                  </div>
-                </div>
-
-                {/* Right Column - Form Fields */}
-                <div className="col-span-3 p-6">
-                  <DialogHeader>
-                    <DialogTitle className="text-xl">Add New Supply</DialogTitle>
-                    <DialogDescription className="text-sm">
-                      Add a new supply item to the inventory
-                    </DialogDescription>
-                  </DialogHeader>
-
-                  <form onSubmit={handleAddSupply} className="mt-6 space-y-6">
-                    <div className="grid grid-cols-2 gap-6">
-                      {/* Supply Details */}
-                      <div className="col-span-2 space-y-2">
-                        <label className="text-sm font-medium">Supply Category</label>
-                        <Select
-                          value={newSupply.cluster}
-                          onValueChange={(value) => setNewSupply({ ...newSupply, cluster: value })}
-                          required
-                        >
-                          <SelectTrigger className="h-11">
-                            <SelectValue placeholder="Select a category" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {clusters.map((cluster) => (
-                              <SelectItem key={cluster.code} value={cluster.code}>
-                                <div className="flex items-center gap-2">
-                                  <span className="font-medium">{cluster.name}</span>
-                                  <span className="text-xs text-gray-500">({cluster.code})</span>
-                                </div>
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      <div className="col-span-2 space-y-2">
-                        <label className="text-sm font-medium">Name</label>
-                        <Input
-                          required
-                          className="h-11 text-sm"
-                          value={newSupply.name}
-                          onChange={(e) => setNewSupply({ ...newSupply, name: e.target.value })}
-                          placeholder="Enter supply name"
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">Quantity</label>
-                        <Input
-                          required
-                          type="number"
-                          min="0"
-                          className="h-11 text-sm"
-                          value={newSupply.quantity}
-                          onChange={(e) => setNewSupply({ ...newSupply, quantity: e.target.value })}
-                          placeholder="Enter quantity"
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium">Unit</label>
-                        <Select
-                          value={newSupply.unit}
-                          onValueChange={(value) => setNewSupply({ ...newSupply, unit: value })}
-                          required
-                        >
-                          <SelectTrigger className="h-11">
-                            <SelectValue placeholder="Select a unit" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {units.map((unit) => (
-                              <SelectItem key={unit.id} value={unit.name}>
-                                {unit.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 pt-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setNewUnitDialogOpen(true)}
-                      >
-                        <Plus className="w-4 h-4 mr-1" />
-                        Add New Unit
-                      </Button>
-                    </div>
-
-                    {/* Submit Button */}
-                    <div className="pt-4">
-                      <Button type="submit" size="lg" className="w-full h-11 text-sm" disabled={loading}>
-                        {loading ? (
-                          <div className="flex items-center gap-2">
-                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                            Adding Supply...
-                          </div>
+          <div className="flex gap-2">
+            <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+              <DialogTrigger asChild>
+                <Button size="lg" className="gap-2">
+                  <Plus className="w-4 h-4" />
+                  Add Supply
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-[900px] p-0 gap-0">
+                <div className="grid grid-cols-5 min-h-[600px]">
+                  {/* Left Column - Image Preview/Upload */}
+                  <div className="col-span-2 bg-gray-50 dark:bg-gray-900/50 p-6 flex flex-col gap-4 border-r border-gray-200 dark:border-gray-800">
+                    <div className="flex-1 flex flex-col gap-4">
+                      <div className="text-sm font-medium text-gray-600 dark:text-gray-400">Supply Image</div>
+                      <div className="relative flex-1 flex flex-col items-center justify-center border-2 border-dashed border-gray-200 dark:border-gray-800 rounded-xl bg-white dark:bg-gray-900/30 overflow-hidden group">
+                        {selectedImage ? (
+                          <>
+                            <img
+                              src={URL.createObjectURL(selectedImage)}
+                              alt="Preview"
+                              className="w-full h-full object-cover"
+                            />
+                            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="text-white border-white hover:text-white"
+                                onClick={() => setSelectedImage(null)}
+                              >
+                                Change Image
+                              </Button>
+                            </div>
+                          </>
                         ) : (
-                          "Add Supply"
+                          <label className="flex-1 w-full h-full flex flex-col items-center justify-center cursor-pointer">
+                            <div className="rounded-full bg-gray-100 dark:bg-gray-800 p-4 mb-4">
+                              <Package className="w-8 h-8 text-gray-400" />
+                            </div>
+                            <div className="text-sm font-medium mb-1">Drop your image here</div>
+                            <div className="text-xs text-gray-500 mb-4">or click to browse</div>
+                            <Input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={handleImageChange}
+                            />
+                          </label>
                         )}
-                      </Button>
+                      </div>
                     </div>
-                  </form>
-                </div>
-              </div>
-            </DialogContent>
-          </Dialog>
+                    <div className="text-xs text-gray-500 text-center">
+                      Supported formats: JPEG, PNG, GIF
+                    </div>
+                  </div>
 
-          {/* Add New Unit Dialog */}
-          <Dialog open={newUnitDialogOpen} onOpenChange={setNewUnitDialogOpen}>
-            <DialogContent className="sm:max-w-[400px]">
-              <DialogHeader>
-                <DialogTitle>Add New Unit</DialogTitle>
-                <DialogDescription>
-                  Enter a new unit of measurement
-                </DialogDescription>
-              </DialogHeader>
-              <form onSubmit={handleAddUnit} className="space-y-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Unit Name</label>
-                  <Input
-                    value={newUnit}
-                    onChange={(e) => setNewUnit(e.target.value)}
-                    placeholder="Enter unit name"
-                    className="h-10"
-                  />
-                </div>
-                <div className="flex justify-end gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setNewUnitDialogOpen(false)}
-                  >
-                    Cancel
-                  </Button>
-                  <Button type="submit">
-                    Add Unit
-                  </Button>
-                </div>
-              </form>
-            </DialogContent>
-          </Dialog>
-        </div>
+                  {/* Right Column - Form Fields */}
+                  <div className="col-span-3 p-6">
+                    <DialogHeader>
+                      <DialogTitle className="text-xl">Add New Supply</DialogTitle>
+                      <DialogDescription className="text-sm">
+                        Add a new supply item to the inventory
+                      </DialogDescription>
+                    </DialogHeader>
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
-          >
-            <Card className="p-8 bg-gradient-to-br from-blue-100 to-blue-50 dark:from-blue-900/40 dark:to-blue-800/40 border-none relative overflow-hidden min-h-[160px]">
-              <div className="flex justify-between items-start">
-                <div>
-                  <h3 className="text-sm font-medium text-gray-600 dark:text-gray-400">Total Items</h3>
-                  <p className="text-2xl font-bold mt-4 text-gray-800 dark:text-white">
-                    {allSupplies.length}
-                  </p>
-                </div>
-                <div className="bg-blue-100 dark:bg-blue-900/50 p-3 rounded-full">
-                  <Boxes className="w-7 h-7 text-blue-600 dark:text-blue-400" />
-                </div>
-              </div>
-            </Card>
-          </motion.div>
+                    <form onSubmit={handleAddSupply} className="mt-6 space-y-6">
+                      <div className="grid grid-cols-2 gap-6">
+                        {/* Supply Details */}
+                        <div className="col-span-2 space-y-2">
+                          <label className="text-sm font-medium">Supply Category</label>
+                          <Select
+                            value={newSupply.cluster}
+                            onValueChange={(value) => setNewSupply({ ...newSupply, cluster: value })}
+                            required
+                          >
+                            <SelectTrigger className="h-11">
+                              <SelectValue placeholder="Select a category" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {clusters.map((cluster) => (
+                                <SelectItem key={cluster.code} value={cluster.code}>
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-medium">{cluster.name}</span>
+                                    <span className="text-xs text-gray-500">({cluster.code})</span>
+                                  </div>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
 
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.1 }}
-          >
-            <Card className="p-8 bg-gradient-to-br from-green-100 to-green-50 dark:from-green-900/40 dark:to-green-800/40 border-none relative overflow-hidden min-h-[160px]">
-              <div className="flex justify-between items-start">
-                <div>
-                  <h3 className="text-sm font-medium text-gray-600 dark:text-gray-400">Low Stock Items</h3>
-                  <p className="text-2xl font-bold mt-4 text-gray-800 dark:text-white">
-                    {allSupplies.filter(s => s.quantity < 10).length}
-                  </p>
-                </div>
-                <div className="bg-yellow-100 dark:bg-yellow-900/50 p-3 rounded-full">
-                  <AlertTriangle className="w-7 h-7 text-yellow-600 dark:text-yellow-400" />
-                </div>
-              </div>
-            </Card>
-          </motion.div>
+                        <div className="col-span-2 space-y-2">
+                          <label className="text-sm font-medium">Name</label>
+                          <Input
+                            required
+                            className="h-11 text-sm"
+                            value={newSupply.name}
+                            onChange={(e) => setNewSupply({ ...newSupply, name: e.target.value })}
+                            placeholder="Enter supply name"
+                          />
+                        </div>
 
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.2 }}
-          >
-            <Card className="p-8 bg-gradient-to-br from-purple-100 to-purple-50 dark:from-purple-900/40 dark:to-purple-800/40 border-none relative overflow-hidden min-h-[160px]">
-              <div className="flex justify-between items-start">
-                <div>
-                  <h3 className="text-sm font-medium text-gray-600 dark:text-gray-400">Out of Stock</h3>
-                  <p className="text-2xl font-bold mt-4 text-gray-800 dark:text-white">
-                    {allSupplies.filter(s => s.quantity === 0).length}
-                  </p>
-                </div>
-                <div className="bg-red-100 dark:bg-red-900/50 p-3 rounded-full">
-                  <XCircle className="w-7 h-7 text-red-600 dark:text-red-400" />
-                </div>
-              </div>
-            </Card>
-          </motion.div>
-        </div>
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium">Quantity</label>
+                          <Input
+                            required
+                            type="number"
+                            min="0"
+                            className="h-11 text-sm"
+                            value={newSupply.quantity}
+                            onChange={(e) => setNewSupply({ ...newSupply, quantity: e.target.value })}
+                            placeholder="Enter quantity"
+                          />
+                        </div>
 
-        {/* Search and Filter Section */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg mt-8">
-          <div className="p-6 border-b border-gray-200 dark:border-gray-700">
-            <div className="flex justify-between items-center gap-4">
-              <div className="relative flex-1 max-w-md">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                <Input
-                  placeholder="Search by ID or name..."
-                  className="pl-10 text-sm pr-4"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
-              </div>
-              <div className="flex items-center gap-4">
-                <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" className="gap-2">
-                      <Calendar className="w-4 h-4" />
-                      {selectedDate ? format(selectedDate, 'PP') : 'Filter by date'}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="end">
-                    <CalendarComponent
-                      mode="single"
-                      selected={selectedDate}
-                      onSelect={(date) => {
-                        setSelectedDate(date);
-                        setDatePickerOpen(false);
-                      }}
-                      initialFocus
-                    />
-                    {selectedDate && (
-                      <div className="p-3 border-t border-gray-100 dark:border-gray-800">
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium">Unit</label>
+                          <Select
+                            value={newSupply.unit}
+                            onValueChange={(value) => setNewSupply({ ...newSupply, unit: value })}
+                            required
+                          >
+                            <SelectTrigger className="h-11">
+                              <SelectValue placeholder="Select a unit" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {units.map((unit) => (
+                                <SelectItem key={unit.id} value={unit.name}>
+                                  {unit.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 pt-2">
                         <Button
-                          variant="ghost"
-                          className="w-full justify-start text-red-600 dark:text-red-400"
-                          onClick={() => {
-                            setSelectedDate(null);
-                            setDatePickerOpen(false);
-                          }}
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setNewUnitDialogOpen(true)}
                         >
-                          Clear filter
+                          <Plus className="w-4 h-4 mr-1" />
+                          Add New Unit
                         </Button>
                       </div>
-                    )}
-                  </PopoverContent>
-                </Popover>
-                <div className="text-sm text-gray-500 dark:text-gray-400">
-                  Showing {filteredSupplies.length} supplies
-                  {selectedDate && ` for ${format(selectedDate, 'PP')}`}
+
+                      {/* Submit Button */}
+                      <div className="pt-4">
+                        <Button type="submit" size="lg" className="w-full h-11 text-sm" disabled={loading}>
+                          {loading ? (
+                            <div className="flex items-center gap-2">
+                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                              Adding Supply...
+                            </div>
+                          ) : (
+                            "Add Supply"
+                          )}
+                        </Button>
+                      </div>
+                    </form>
+                  </div>
                 </div>
+              </DialogContent>
+            </Dialog>
+
+            <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
+              <DialogTrigger asChild>
+                <Button size="lg" variant="outline" className="gap-2">
+                  <Plus className="w-4 h-4" />
+                  Import Data
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Import Excel Data</DialogTitle>
+                  <DialogDescription>
+                    Select an Excel file to import. Only the "Item" column will be imported as supply names.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <div className="grid w-full max-w-sm items-center gap-1.5">
+                    <Input
+                      type="file"
+                      accept=".xlsx,.xls"
+                      onChange={handleImportExcel}
+                      className="cursor-pointer"
+                    />
+                  </div>
+                  <div className="text-sm text-gray-500 dark:text-gray-400">
+                    Note: Only Excel files (.xlsx, .xls) are supported. The system will only import the "Item" column.
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
+          </div>
+        </div>
+
+        {/* Add New Unit Dialog */}
+        <Dialog open={newUnitDialogOpen} onOpenChange={setNewUnitDialogOpen}>
+          <DialogContent className="sm:max-w-[400px]">
+            <DialogHeader>
+              <DialogTitle>Add New Unit</DialogTitle>
+              <DialogDescription>
+                Enter a new unit of measurement
+              </DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handleAddUnit} className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Unit Name</label>
+                <Input
+                  value={newUnit}
+                  onChange={(e) => setNewUnit(e.target.value)}
+                  placeholder="Enter unit name"
+                  className="h-10"
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setNewUnitDialogOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit">
+                  Add Unit
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+        >
+          <Card className="p-8 bg-gradient-to-br from-blue-100 to-blue-50 dark:from-blue-900/40 dark:to-blue-800/40 border-none relative overflow-hidden min-h-[160px]">
+            <div className="flex justify-between items-start">
+              <div>
+                <h3 className="text-sm font-medium text-gray-600 dark:text-gray-400">Total Items</h3>
+                <p className="text-2xl font-bold mt-4 text-gray-800 dark:text-white">
+                  {allSupplies.length}
+                </p>
+              </div>
+              <div className="bg-blue-100 dark:bg-blue-900/50 p-3 rounded-full">
+                <Boxes className="w-7 h-7 text-blue-600 dark:text-blue-400" />
+              </div>
+            </div>
+          </Card>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.1 }}
+        >
+          <Card className="p-8 bg-gradient-to-br from-green-100 to-green-50 dark:from-green-900/40 dark:to-green-800/40 border-none relative overflow-hidden min-h-[160px]">
+            <div className="flex justify-between items-start">
+              <div>
+                <h3 className="text-sm font-medium text-gray-600 dark:text-gray-400">Low Stock Items</h3>
+                <p className="text-2xl font-bold mt-4 text-gray-800 dark:text-white">
+                  {allSupplies.filter(s => s.quantity < 10).length}
+                </p>
+              </div>
+              <div className="bg-yellow-100 dark:bg-yellow-900/50 p-3 rounded-full">
+                <AlertTriangle className="w-7 h-7 text-yellow-600 dark:text-yellow-400" />
+              </div>
+            </div>
+          </Card>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.2 }}
+        >
+          <Card className="p-8 bg-gradient-to-br from-purple-100 to-purple-50 dark:from-purple-900/40 dark:to-purple-800/40 border-none relative overflow-hidden min-h-[160px]">
+            <div className="flex justify-between items-start">
+              <div>
+                <h3 className="text-sm font-medium text-gray-600 dark:text-gray-400">Out of Stock</h3>
+                <p className="text-2xl font-bold mt-4 text-gray-800 dark:text-white">
+                  {allSupplies.filter(s => s.quantity === 0).length}
+                </p>
+              </div>
+              <div className="bg-red-100 dark:bg-red-900/50 p-3 rounded-full">
+                <XCircle className="w-7 h-7 text-red-600 dark:text-red-400" />
+              </div>
+            </div>
+          </Card>
+        </motion.div>
+      </div>
+
+      {/* Search and Filter Section */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg mt-8">
+        <div className="p-6 border-b border-gray-200 dark:border-gray-700">
+          <div className="flex justify-between items-center gap-4">
+            <div className="relative flex-1 max-w-md">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+              <Input 
+                placeholder="Search supplies..." 
+                className="pl-10 text-sm pr-4"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
+            <div className="flex items-center gap-4">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className={cn(
+                      "h-10 w-10",
+                      stockFilter !== 'all' && "bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800"
+                    )}
+                  >
+                    <Filter className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-40">
+                  <DropdownMenuItem 
+                    onClick={() => setStockFilter('all')}
+                    className={cn(stockFilter === 'all' && "bg-blue-50 dark:bg-blue-900/20")}
+                  >
+                    All Items
+                  </DropdownMenuItem>
+                  <DropdownMenuItem 
+                    onClick={() => setStockFilter('low')}
+                    className={cn(
+                      stockFilter === 'low' && "bg-blue-50 dark:bg-blue-900/20",
+                      "text-yellow-600 dark:text-yellow-400"
+                    )}
+                  >
+                    Low Stock
+                  </DropdownMenuItem>
+                  <DropdownMenuItem 
+                    onClick={() => setStockFilter('out')}
+                    className={cn(
+                      stockFilter === 'out' && "bg-blue-50 dark:bg-blue-900/20",
+                      "text-red-600 dark:text-red-400"
+                    )}
+                  >
+                    Out of Stock
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={toggleSort}
+                className={cn(
+                  "h-10 w-10",
+                  sortOrder === 'desc' && "bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800"
+                )}
+              >
+                <ArrowUpDown className="h-4 w-4" />
+              </Button>
+
+              <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="gap-2">
+                    <Calendar className="w-4 h-4" />
+                    {selectedDate ? format(selectedDate, 'PP') : 'Filter by date'}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="end">
+                  <CalendarComponent
+                    mode="single"
+                    selected={selectedDate}
+                    onSelect={(date) => {
+                      setSelectedDate(date);
+                      setDatePickerOpen(false);
+                    }}
+                    initialFocus
+                  />
+                  {selectedDate && (
+                    <div className="p-3 border-t border-gray-100 dark:border-gray-800">
+                      <Button
+                        variant="ghost"
+                        className="w-full justify-start text-red-600 dark:text-red-400"
+                        onClick={() => {
+                          setSelectedDate(null);
+                          setDatePickerOpen(false);
+                        }}
+                      >
+                        Clear filter
+                      </Button>
+                    </div>
+                  )}
+                </PopoverContent>
+              </Popover>
+              <div className="text-sm text-gray-500 dark:text-gray-400">
+                Showing {filteredSupplies.length} supplies
+                {selectedDate && ` for ${format(selectedDate, 'PP')}`}
+                {stockFilter !== 'all' && ` (${stockFilter === 'low' ? 'Low Stock' : 'Out of Stock'})`}
               </div>
             </div>
           </div>
+        </div>
 
-          {/* Table section */}
-          <div className="p-4">
-            <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>ID</TableHead>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Quantity</TableHead>
-                    <TableHead>Unit</TableHead>
-                    <TableHead>Cluster</TableHead>
-                    <TableHead>Date Added</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {isLoading ? (
-                    // Loading skeletons
-                    Array(5).fill(null).map((_, index) => (
-                      <TableRow key={`loading-${index}`}>
-                        <TableCell>
-                          <Skeleton className="h-6 w-16" />
-                        </TableCell>
-                        <TableCell>
-                          <Skeleton className="h-6 w-32" />
-                        </TableCell>
-                        <TableCell>
-                          <Skeleton className="h-6 w-16" />
-                        </TableCell>
-                        <TableCell>
-                          <Skeleton className="h-6 w-20" />
-                        </TableCell>
-                        <TableCell>
-                          <Skeleton className="h-6 w-24" />
-                        </TableCell>
-                        <TableCell>
-                          <Skeleton className="h-6 w-32" />
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex gap-2">
-                            <Skeleton className="h-9 w-9" />
-                            <Skeleton className="h-9 w-9" />
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  ) : filteredSupplies.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={7} className="text-center py-8 text-gray-500 dark:text-gray-400">
-                        No supplies found
+        {/* Table section */}
+        <div className="p-4">
+          <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>ID</TableHead>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Quantity</TableHead>
+                  <TableHead>Unit</TableHead>
+                  <TableHead>Cluster</TableHead>
+                  <TableHead>Date Added</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {isLoading ? (
+                  // Loading skeletons
+                  Array(5).fill(null).map((_, index) => (
+                    <TableRow key={`loading-${index}`}>
+                      <TableCell>
+                        <Skeleton className="h-6 w-16" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-6 w-32" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-6 w-16" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-6 w-20" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-6 w-24" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-6 w-32" />
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex gap-2">
+                          <Skeleton className="h-9 w-9" />
+                          <Skeleton className="h-9 w-9" />
+                        </div>
                       </TableCell>
                     </TableRow>
-                  ) : (
-                    filteredSupplies.map((supply) => (
-                      <TableRow key={supply.id}>
-                        <TableCell className="font-mono">{supply.id}</TableCell>
-                        <TableCell>
-                          <span className="px-2.5 py-1 rounded-md bg-blue-50 dark:bg-blue-900/20 font-medium">
-                            {supply.name}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          <span className="px-2.5 py-1 rounded-md bg-green-50 dark:bg-green-900/20 font-medium">
-                            {supply.quantity}
-                          </span>
-                        </TableCell>
-                        <TableCell>{supply.unit}</TableCell>
-                        <TableCell>{supply.cluster}</TableCell>
-                        <TableCell>
-                          {formatDate(supply.dateAdded)}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex gap-2">
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              onClick={() => handleEditClick(supply)}
-                              className="bg-blue-600 hover:bg-blue-700 text-white gap-2"
-                            >
-                              <Pencil className="w-4 h-4" />
-                              Edit
-                            </Button>
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              onClick={() => handleDeleteClick(supply)}
-                              className="bg-red-600 hover:bg-red-700 text-white gap-2"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                              Delete
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </div>
+                  ))
+                ) : currentSupplies.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center py-8 text-gray-500 dark:text-gray-400">
+                      No supplies found
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  currentSupplies.map((supply) => (
+                    <TableRow key={supply.id}>
+                      <TableCell className="font-mono">{supply.id}</TableCell>
+                      <TableCell>
+                        <span className="px-2.5 py-1 rounded-md bg-blue-50 dark:bg-blue-900/20 font-medium">
+                          {supply.name}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <span className="px-2.5 py-1 rounded-md bg-green-50 dark:bg-green-900/20 font-medium">
+                          {supply.quantity}
+                        </span>
+                      </TableCell>
+                      <TableCell>{supply.unit}</TableCell>
+                      <TableCell>{supply.cluster}</TableCell>
+                      <TableCell>
+                        {formatDate(supply.dateAdded)}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => handleEditClick(supply)}
+                            className="bg-blue-600 hover:bg-blue-700 text-white gap-2"
+                          >
+                            <Pencil className="w-4 h-4" />
+                            Edit
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => handleDeleteClick(supply)}
+                            className="bg-red-600 hover:bg-red-700 text-white gap-2"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                            Delete
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
           </div>
+
+          {/* Pagination */}
+          {!isLoading && filteredSupplies.length > 0 && (
+            <div className="mt-6 flex justify-between items-center px-4">
+              <div className="text-sm text-gray-500 dark:text-gray-400">
+                Showing {startIndex + 1} to {Math.min(endIndex, filteredSupplies.length)} of {filteredSupplies.length} supplies
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                  disabled={currentPage === 1}
+                  className="gap-2"
+                >
+                  Previous
+                </Button>
+
+                <div className="flex items-center gap-1">
+                  {Array.from({ length: totalPages }, (_, i) => i + 1)
+                    .filter(page => {
+                      if (page === 1 || page === totalPages) return true;
+                      if (page >= currentPage - 1 && page <= currentPage + 1) return true;
+                      return false;
+                    })
+                    .map((page, i, arr) => (
+                      <React.Fragment key={page}>
+                        {i > 0 && arr[i - 1] !== page - 1 && (
+                          <span className="text-gray-400 dark:text-gray-600">...</span>
+                        )}
+                        <Button
+                          variant={currentPage === page ? "default" : "outline"}
+                          size="sm"
+                          onClick={() => setCurrentPage(page)}
+                          className={cn(
+                            "h-8 w-8 p-0",
+                            currentPage === page && "bg-blue-600 hover:bg-blue-700"
+                          )}
+                        >
+                          {page}
+                        </Button>
+                      </React.Fragment>
+                    ))}
+                </div>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                  disabled={currentPage === totalPages}
+                  className="gap-2"
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

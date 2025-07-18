@@ -55,7 +55,7 @@ import {
   deleteDoc
 } from "firebase/firestore";
 import { db } from "../../lib/firebase";
-import { Search, Plus, Package, Pencil, Trash2, Calendar } from "lucide-react";
+import { Search, Plus, Package, Pencil, Trash2, Calendar, ArrowUpDown } from "lucide-react";
 import {
   Command,
   CommandEmpty,
@@ -114,6 +114,7 @@ export function DeliveryPage() {
 
   const [currentPage, setCurrentPage] = useState(1);
   const rowsPerPage = 15;
+  const [sortOrder, setSortOrder] = useState('asc');
 
   // Generate placeholder rows
   const generatePlaceholderRows = () => {
@@ -218,9 +219,23 @@ export function DeliveryPage() {
         return deliveryDate >= startOfDay && deliveryDate <= endOfDay;
       });
     }
-    
+
+    // Sort the filtered deliveries by supply name
+    filtered = [...filtered].sort((a, b) => {
+      const nameA = (a.supplyName || '').charAt(0).toLowerCase();
+      const nameB = (b.supplyName || '').charAt(0).toLowerCase();
+      return sortOrder === 'asc' 
+        ? nameA.localeCompare(nameB)
+        : nameB.localeCompare(nameA);
+    });
+
     setFilteredDeliveries(filtered);
-  }, [searchTerm, allDeliveries, selectedDate]);
+  }, [searchTerm, allDeliveries, selectedDate, sortOrder]);
+
+  // Add toggle sort function
+  const toggleSort = () => {
+    setSortOrder(current => current === 'asc' ? 'desc' : 'asc');
+  };
 
   const handleAddDelivery = async (e) => {
     e.preventDefault();
@@ -570,14 +585,26 @@ export function DeliveryPage() {
           <div className="flex justify-between items-center gap-4">
             <div className="relative flex-1 max-w-md">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-              <Input
-                placeholder="Search by ID or supply name..."
+              <Input 
+                placeholder="Search deliveries..." 
                 className="pl-10 text-sm pr-4"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
             <div className="flex items-center gap-4">
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={toggleSort}
+                className={cn(
+                  "h-10 w-10",
+                  sortOrder === 'desc' && "bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800"
+                )}
+              >
+                <ArrowUpDown className="h-4 w-4" />
+              </Button>
+
               <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
                 <PopoverTrigger asChild>
                   <Button variant="outline" className="gap-2">
@@ -614,6 +641,7 @@ export function DeliveryPage() {
               <div className="text-sm text-gray-500 dark:text-gray-400">
                 Showing {filteredDeliveries.length} deliveries
                 {selectedDate && ` for ${format(selectedDate, 'PP')}`}
+                {` (${sortOrder === 'asc' ? 'A-Z' : 'Z-A'})`}
               </div>
             </div>
           </div>

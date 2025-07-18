@@ -11,18 +11,9 @@ import { SuppliesStock } from "./components/pages/SuppliesStock";
 import { ReleaseSupply } from "./components/pages/ReleaseSupply";
 import { GenerateExport } from "./components/pages/GenerateExport";
 import { DeliveryPage } from "./components/pages/DeliveryPage";
+import { Reports } from "./components/pages/Reports";
 
 // Placeholder components for other routes
-const Reports = () => (
-  <div className="p-8">
-    <h1 className="text-2xl font-bold text-gray-800 dark:text-white mb-4">Reports</h1>
-    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-      <h2 className="text-lg font-semibold text-gray-800 dark:text-white mb-4">Analytics & Reports</h2>
-      {/* Add your reports content here */}
-    </div>
-  </div>
-);
-
 const Account = () => (
   <div className="p-8">
     <h1 className="text-2xl font-bold text-gray-800 dark:text-white mb-4">Account Settings</h1>

@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
+import { useNavigate } from "react-router-dom";
 import {
   LineChart,
   Line,
@@ -34,6 +35,7 @@ import {
 } from "lucide-react";
 
 export function Dashboard() {
+  const navigate = useNavigate();
   // State for various dashboard data
   const [stats, setStats] = useState({
     totalSupplies: 0,
@@ -429,9 +431,26 @@ export function Dashboard() {
           variants={itemVariants}
           className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700"
         >
-          <h3 className="text-lg font-semibold text-gray-800 dark:text-white mb-4">Low Stock Alerts</h3>
+          <div className="flex justify-between items-center mb-4">
+            <div className="flex items-center gap-3">
+              <h3 className="text-lg font-semibold text-gray-800 dark:text-white">Low Stock Alerts</h3>
+              <div className="px-2.5 py-0.5 rounded-full bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-sm font-medium">
+                {lowStockAlerts.length} items
+              </div>
+            </div>
+            {lowStockAlerts.length > 5 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => navigate('/supplies')}
+                className="text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+              >
+                View All ({lowStockAlerts.length})
+              </Button>
+            )}
+          </div>
           <div className="space-y-4">
-            {lowStockAlerts.map((alert) => (
+            {lowStockAlerts.slice(0, 5).map((alert) => (
               <div
                 key={alert.id}
                 className="flex items-center justify-between p-4 bg-red-50 dark:bg-red-900/20 rounded-lg"
@@ -450,12 +469,18 @@ export function Dashboard() {
                 <Button
                   variant="outline"
                   size="sm"
+                  onClick={() => navigate('/supplies')}
                   className="border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/50"
                 >
                   Restock
                 </Button>
               </div>
             ))}
+            {lowStockAlerts.length === 0 && (
+              <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                No low stock alerts
+              </div>
+            )}
           </div>
         </motion.div>
       </div>
