@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { useAuth } from "../../lib/AuthContext";
 import { Card } from "../ui/card";
 import { Input } from "../ui/input";
@@ -7,30 +7,19 @@ import { Button } from "../ui/button";
 import { Avatar, AvatarFallback } from "../ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Label } from "../ui/label";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "../ui/alert-dialog";
 import { toast } from "sonner";
 import {
   User,
   Mail,
   Lock,
   Shield,
-  Bell,
-  Settings,
   Key,
   LogOut,
   CheckCircle2,
   Eye,
-  EyeOff
+  EyeOff,
+  Github,
+  Facebook
 } from "lucide-react";
 
 export function Account() {
@@ -150,7 +139,7 @@ export function Account() {
         >
           <Card className="p-6">
             <Tabs defaultValue="personal" className="w-full">
-              <TabsList className="grid w-full grid-cols-4 mb-8">
+              <TabsList className="grid w-full grid-cols-3 mb-8">
                 <TabsTrigger value="personal" className="gap-2">
                   <User className="w-4 h-4" />
                   <span className="hidden sm:inline">Personal</span>
@@ -159,13 +148,9 @@ export function Account() {
                   <Shield className="w-4 h-4" />
                   <span className="hidden sm:inline">Security</span>
                 </TabsTrigger>
-                <TabsTrigger value="notifications" className="gap-2">
-                  <Bell className="w-4 h-4" />
-                  <span className="hidden sm:inline">Notifications</span>
-                </TabsTrigger>
-                <TabsTrigger value="preferences" className="gap-2">
-                  <Settings className="w-4 h-4" />
-                  <span className="hidden sm:inline">Preferences</span>
+                <TabsTrigger value="about" className="gap-2">
+                  <User className="w-4 h-4" />
+                  <span className="hidden sm:inline">About Us</span>
                 </TabsTrigger>
               </TabsList>
 
@@ -295,70 +280,87 @@ export function Account() {
                     )}
                   </Button>
                 </form>
-
-                <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
-                  <h3 className="text-lg font-semibold mb-4">Security Settings</h3>
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-medium">Two-Factor Authentication</p>
-                        <p className="text-sm text-gray-500">Add an extra layer of security</p>
-                      </div>
-                      <Button variant="outline">Setup 2FA</Button>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-medium">Active Sessions</p>
-                        <p className="text-sm text-gray-500">Manage your active sessions</p>
-                      </div>
-                      <Button variant="outline">View Sessions</Button>
-                    </div>
-                  </div>
-                </div>
               </TabsContent>
 
-              <TabsContent value="notifications" className="space-y-6">
-                <div className="space-y-4">
-                  <h3 className="text-lg font-semibold mb-4">Notification Preferences</h3>
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-medium">Email Notifications</p>
-                        <p className="text-sm text-gray-500">Receive updates via email</p>
+              <TabsContent value="about" className="space-y-6">
+                <Card className="p-6">
+                  <h2 className="text-xl font-semibold mb-6">About the Developers</h2>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    {/* Kobie */}
+                    <div className="space-y-4">
+                      <div className="aspect-square w-48 mx-auto overflow-hidden rounded-xl">
+                        <img
+                          src="images/kobie.jpg"
+                          alt="Kobie O. Villanueva"
+                          className="w-full h-full object-cover"
+                        />
                       </div>
-                      <Button variant="outline">Configure</Button>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-medium">System Alerts</p>
-                        <p className="text-sm text-gray-500">Important system notifications</p>
+                      <div className="text-center">
+                        <h3 className="text-lg font-semibold">Kobie O. Villanueva</h3>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Web Developer</p>
+                        <p className="text-sm text-gray-600 dark:text-gray-300 mt-2">
+                          Bachelor of Science in Information Technology<br />
+                          Major in Network and Web Application<br />
+                          Bataan Peninsula State University - Main Campus
+                        </p>
+                        <div className="flex justify-center gap-3 mt-4">
+                          <Button variant="outline" size="icon" asChild>
+                            <a href="mailto:kobie.villanueva@example.com" target="_blank" rel="noopener noreferrer">
+                              <Mail className="h-4 w-4" />
+                            </a>
+                          </Button>
+                          <Button variant="outline" size="icon" asChild>
+                            <a href="https://www.facebook.com/villanuevafreeze.18" target="_blank" rel="noopener noreferrer">
+                              <Facebook className="h-4 w-4" />
+                            </a>
+                          </Button>
+                          <Button variant="outline" size="icon" asChild>
+                            <a href="https://github.com/hadesxkore" target="_blank" rel="noopener noreferrer">
+                              <Github className="h-4 w-4" />
+                            </a>
+                          </Button>
+                        </div>
                       </div>
-                      <Button variant="outline">Configure</Button>
                     </div>
-                  </div>
-                </div>
-              </TabsContent>
 
-              <TabsContent value="preferences" className="space-y-6">
-                <div className="space-y-4">
-                  <h3 className="text-lg font-semibold mb-4">System Preferences</h3>
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-medium">Language</p>
-                        <p className="text-sm text-gray-500">Select your preferred language</p>
+                    {/* Peter */}
+                    <div className="space-y-4">
+                      <div className="aspect-square w-48 mx-auto overflow-hidden rounded-xl">
+                        <img
+                          src="images/peter.jpg"
+                          alt="Peter Carlos V. Ronquillo"
+                          className="w-full h-full object-cover"
+                        />
                       </div>
-                      <Button variant="outline">Change</Button>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-medium">Time Zone</p>
-                        <p className="text-sm text-gray-500">Set your local time zone</p>
+                      <div className="text-center">
+                        <h3 className="text-lg font-semibold">Peter Carlos V. Ronquillo</h3>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Web Developer</p>
+                        <p className="text-sm text-gray-600 dark:text-gray-300 mt-2">
+                          Bachelor of Science in Information Technology<br />
+                          Major in Network and Web Application<br />
+                          Bataan Peninsula State University - Main Campus
+                        </p>
+                        <div className="flex justify-center gap-3 mt-4">
+                          <Button variant="outline" size="icon" asChild>
+                            <a href="mailto:peter.ronquillo@example.com" target="_blank" rel="noopener noreferrer">
+                              <Mail className="h-4 w-4" />
+                            </a>
+                          </Button>
+                          <Button variant="outline" size="icon" asChild>
+                            <a href="https://www.facebook.com/paperonce" target="_blank" rel="noopener noreferrer">
+                              <Facebook className="h-4 w-4" />
+                            </a>
+                          </Button>
+                          <Button variant="outline" size="icon" asChild>
+                            <a href="#" target="_blank" rel="noopener noreferrer">
+                              <Github className="h-4 w-4" />
+                            </a>
+                          </Button>
+                        </div>
                       </div>
-                      <Button variant="outline">Change</Button>
                     </div>
                   </div>
-                </div>
+                </Card>
               </TabsContent>
             </Tabs>
           </Card>
