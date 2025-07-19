@@ -38,6 +38,8 @@ import {
 
 export function Dashboard() {
   const navigate = useNavigate();
+  const [modalOpen, setModalOpen] = useState(false);
+  const [pieModalOpen, setPieModalOpen] = useState(false);
   const chartRef = useRef(null);
   // State for various dashboard data
   const [stats, setStats] = useState({
@@ -79,6 +81,20 @@ export function Dashboard() {
     green: ["#34D399", "#10B981", "#059669"],
     purple: ["#A78BFA", "#8B5CF6", "#7C3AED"],
     red: ["#F87171", "#EF4444", "#DC2626"]
+  };
+
+  const modalVariants = {
+    hidden: { opacity: 0, scale: 0.95 },
+    visible: {
+      opacity: 1,
+      scale: 1,
+      transition: { type: "spring", duration: 0.5 }
+    },
+    exit: {
+      opacity: 0,
+      scale: 0.95,
+      transition: { duration: 0.2 }
+    }
   };
 
   // Fetch real-time data
@@ -321,6 +337,14 @@ export function Dashboard() {
                 <div className="w-3 h-3 rounded-full bg-red-500"></div>
                 <span className="text-sm text-gray-600 dark:text-gray-300">Total Releases</span>
               </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setModalOpen(true)}
+                className="ml-4 hover:bg-blue-50 hover:border-blue-200 dark:hover:bg-blue-900/20"
+              >
+                <Maximize2 className="w-4 h-4" />
+              </Button>
             </div>
           </div>
           <div className="h-[300px]" ref={chartRef}>
@@ -396,12 +420,252 @@ export function Dashboard() {
           </div>
         </motion.div>
 
+        {/* Modern Modal */}
+        <Dialog open={modalOpen} onOpenChange={setModalOpen}>
+          <DialogContent className="max-w-[800px] w-[800px] p-0 overflow-hidden">
+            <motion.div
+              initial="hidden"
+              animate="visible"
+              exit="exit"
+              variants={modalVariants}
+              className="w-full rounded-2xl shadow-lg bg-white p-8 space-y-6"
+            >
+              {/* Header with Logo */}
+              <div className="text-center space-y-3">
+                <div className="flex justify-center">
+                  <img src="/images/bataan-logo.png" alt="Bataan Logo" className="h-16 w-16 object-contain" />
+                </div>
+                <h2 className="text-xl font-bold text-blue-700">PROVINCIAL GOVERNMENT OF BATAAN</h2>
+                <p className="text-base text-gray-600">OFFICE OF THE PROVINCIAL GOVERNOR</p>
+                <p className="text-xs text-gray-400">
+                  {new Date().toLocaleDateString('en-US', { 
+                    weekday: 'long',
+                    year: 'numeric', 
+                    month: 'long', 
+                    day: 'numeric' 
+                  })}
+                </p>
+              </div>
+
+              {/* Stats Grid */}
+              <div className="grid grid-cols-3 gap-6 text-center">
+                <div className="bg-gray-50 rounded-xl p-6">
+                  <p className="text-sm text-gray-500">Supplies</p>
+                  <h3 className="text-2xl font-bold text-blue-600">{stats.totalSupplies}</h3>
+                  <span className="text-green-500 text-sm">+12%</span>
+                </div>
+                <div className="bg-gray-50 rounded-xl p-6">
+                  <p className="text-sm text-gray-500">Deliveries</p>
+                  <h3 className="text-2xl font-bold text-green-600">{stats.totalDeliveries}</h3>
+                  <span className="text-green-500 text-sm">On Track</span>
+                </div>
+                <div className="bg-gray-50 rounded-xl p-6">
+                  <p className="text-sm text-gray-500">Releases</p>
+                  <h3 className="text-2xl font-bold text-red-600">{stats.totalReleases}</h3>
+                  <span className="text-red-500 text-sm">-3.1%</span>
+                </div>
+              </div>
+
+              {/* Chart Section */}
+              <div className="mt-6">
+                <h4 className="text-lg font-semibold text-gray-700 mb-3">Inventory Distribution</h4>
+                <div className="w-full h-48 bg-gray-50 rounded-xl p-4">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={[
+                        {
+                          name: 'Current Status',
+                          totalSupplies: stats.totalSupplies,
+                          totalDeliveries: stats.totalDeliveries,
+                          totalReleases: stats.totalReleases
+                        }
+                      ]}
+                      margin={{ top: 15, right: 25, left: 25, bottom: 15 }}
+                      barSize={50}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                      <XAxis 
+                        dataKey="name" 
+                        tick={{ fontSize: 14, fill: '#6B7280' }}
+                        tickLine={false}
+                        axisLine={false}
+                      />
+                      <YAxis
+                        tick={{ fontSize: 14, fill: '#6B7280' }}
+                        tickLine={false}
+                        axisLine={false}
+                        width={50}
+                      />
+                      <Tooltip
+                        content={({ active, payload }) => {
+                          if (active && payload && payload.length) {
+                            return (
+                              <div className="bg-white p-4 shadow-lg rounded-lg border border-gray-200">
+                                <div className="space-y-2">
+                                  <p className="text-sm text-blue-600 font-medium">
+                                    Supplies: {payload[0]?.value || 0}
+                                  </p>
+                                  <p className="text-sm text-green-600 font-medium">
+                                    Deliveries: {payload[1]?.value || 0}
+                                  </p>
+                                  <p className="text-sm text-red-600 font-medium">
+                                    Releases: {payload[2]?.value || 0}
+                                  </p>
+                                </div>
+                              </div>
+                            );
+                          }
+                          return null;
+                        }}
+                      />
+                      <Bar 
+                        dataKey="totalSupplies" 
+                        name="Supplies"
+                        fill="#3B82F6" 
+                        radius={[6, 6, 0, 0]}
+                      />
+                      <Bar 
+                        dataKey="totalDeliveries" 
+                        name="Deliveries"
+                        fill="#10B981" 
+                        radius={[6, 6, 0, 0]}
+                      />
+                      <Bar 
+                        dataKey="totalReleases" 
+                        name="Releases"
+                        fill="#EF4444" 
+                        radius={[6, 6, 0, 0]}
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </motion.div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Pie Chart Modal */}
+        <Dialog open={pieModalOpen} onOpenChange={setPieModalOpen}>
+          <DialogContent className="max-w-[800px] w-[800px] p-0 overflow-hidden">
+            <motion.div
+              initial="hidden"
+              animate="visible"
+              exit="exit"
+              variants={modalVariants}
+              className="w-full rounded-2xl shadow-lg bg-white p-8 space-y-6"
+            >
+              {/* Header with Logo */}
+              <div className="text-center space-y-3">
+                <div className="flex justify-center">
+                  <img src="/images/bataan-logo.png" alt="Bataan Logo" className="h-16 w-16 object-contain" />
+                </div>
+                <h2 className="text-xl font-bold text-blue-700">PROVINCIAL GOVERNMENT OF BATAAN</h2>
+                <p className="text-base text-gray-600">OFFICE OF THE PROVINCIAL GOVERNOR</p>
+                <p className="text-xs text-gray-400">
+                  {new Date().toLocaleDateString('en-US', { 
+                    weekday: 'long',
+                    year: 'numeric', 
+                    month: 'long', 
+                    day: 'numeric' 
+                  })}
+                </p>
+              </div>
+
+              {/* Stats Grid */}
+              <div className="grid grid-cols-3 gap-6 text-center">
+                <div className="bg-gray-50 rounded-xl p-6">
+                  <p className="text-sm text-gray-500">Supplies</p>
+                  <h3 className="text-2xl font-bold text-blue-600">{stats.totalSupplies}</h3>
+                  <span className="text-green-500 text-sm">+12%</span>
+                </div>
+                <div className="bg-gray-50 rounded-xl p-6">
+                  <p className="text-sm text-gray-500">Deliveries</p>
+                  <h3 className="text-2xl font-bold text-green-600">{stats.totalDeliveries}</h3>
+                  <span className="text-green-500 text-sm">On Track</span>
+                </div>
+                <div className="bg-gray-50 rounded-xl p-6">
+                  <p className="text-sm text-gray-500">Releases</p>
+                  <h3 className="text-2xl font-bold text-purple-600">{stats.totalReleases}</h3>
+                  <span className="text-red-500 text-sm">-3.1%</span>
+                </div>
+              </div>
+
+              {/* Pie Chart Section */}
+              <div className="mt-6">
+                <h4 className="text-lg font-semibold text-gray-700 mb-3">Inventory Overview</h4>
+                <div className="w-full h-64 bg-gray-50 rounded-xl p-4">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={[
+                          { name: 'Total Supplies', value: stats.totalSupplies, color: CHART_COLORS.blue[1] },
+                          { name: 'Total Deliveries', value: stats.totalDeliveries, color: CHART_COLORS.green[1] },
+                          { name: 'Total Releases', value: stats.totalReleases, color: CHART_COLORS.purple[1] }
+                        ]}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={50}
+                        outerRadius={80}
+                        paddingAngle={5}
+                        dataKey="value"
+                      >
+                        {[
+                          CHART_COLORS.blue[1],
+                          CHART_COLORS.green[1],
+                          CHART_COLORS.purple[1]
+                        ].map((color, index) => (
+                          <Cell key={`cell-${index}`} fill={color} />
+                        ))}
+                      </Pie>
+                      <Tooltip 
+                        content={({ active, payload }) => {
+                          if (active && payload && payload.length) {
+                            return (
+                              <div className="bg-white p-4 shadow-lg rounded-lg border border-gray-200">
+                                <div className="space-y-2">
+                                  <p className="text-sm font-medium text-gray-700">
+                                    {payload[0]?.name}: {payload[0]?.value}
+                                  </p>
+                                </div>
+                              </div>
+                            );
+                          }
+                          return null;
+                        }}
+                      />
+                      <Legend 
+                        verticalAlign="bottom" 
+                        height={36}
+                        formatter={(value, entry) => (
+                          <span className="text-sm font-medium text-gray-700">
+                            {value}
+                          </span>
+                        )}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </motion.div>
+          </DialogContent>
+        </Dialog>
+
         {/* Inventory Overview Chart */}
         <motion.div
           variants={itemVariants}
           className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700"
         >
-          <h3 className="text-lg font-semibold text-gray-800 dark:text-white mb-4">Inventory Overview</h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-gray-800 dark:text-white">Inventory Overview</h3>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPieModalOpen(true)}
+              className="hover:bg-blue-50 hover:border-blue-200 dark:hover:bg-blue-900/20"
+            >
+              <Maximize2 className="w-4 h-4" />
+            </Button>
+          </div>
           <div className="h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
