@@ -290,7 +290,7 @@ export function Account() {
                     <div className="space-y-4">
                       <div className="aspect-square w-48 mx-auto overflow-hidden rounded-xl">
                         <img
-                          src="images/kobie.jpg"
+                          src="/images/kobie.jpg"
                           alt="Kobie O. Villanueva"
                           className="w-full h-full object-cover"
                         />
@@ -327,7 +327,7 @@ export function Account() {
                     <div className="space-y-4">
                       <div className="aspect-square w-48 mx-auto overflow-hidden rounded-xl">
                         <img
-                          src="images/peter.jpg"
+                          src="/images/peter.jpg"
                           alt="Peter Carlos V. Ronquillo"
                           className="w-full h-full object-cover"
                         />
