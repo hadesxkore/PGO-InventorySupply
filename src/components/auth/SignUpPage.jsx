@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Button } from "../ui/button";
 import { AuthLayout } from "./AuthLayout";
@@ -115,12 +115,12 @@ export function SignUpPage() {
 
         <p className="mt-4 text-center text-sm text-gray-600">
           Already have an account?{" "}
-          <a
-            href="/login"
+          <Link
+            to="/login"
             className="font-medium text-blue-600 hover:text-blue-500"
           >
             Log in
-          </a>
+          </Link>
         </p>
       </motion.div>
     </AuthLayout>
