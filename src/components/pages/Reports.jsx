@@ -27,32 +27,46 @@ import {
   TableRow,
 } from "../ui/table";
 import { DatePickerWithRange } from "../ui/date-range-picker";
-import { addDays, format, isWithinInterval, parseISO } from "date-fns";
-import { collection, query, orderBy, getDocs, where, Timestamp } from "firebase/firestore";
-import { db, clusters } from "../../lib/firebase";
+import { format } from "date-fns";
+import { clusters } from "../../lib/firebase";
 import { FileText, FileIcon, Download, Calendar, ArrowUpDown, Filter, Search, Package, ArrowUpRight } from "lucide-react";
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import React from "react";
+import { useReports } from "../../lib/ReportsContext";
 
 export function Reports() {
+  const { reportsData, isLoading, dateRange, setDateRange } = useReports();
   const [reportType, setReportType] = useState("supplies");
-  const [dateRange, setDateRange] = useState({
-    from: addDays(new Date(), -30),
-    to: new Date(),
-  });
-  const [reportData, setReportData] = useState([]);
-  const [loading, setLoading] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [sortOrder, setSortOrder] = useState('asc');
   const [selectedCluster, setSelectedCluster] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
   const itemsPerPage = 20;
 
+  // Debug logs
+  console.log('Reports Context Data:', { reportsData, isLoading, dateRange });
+  console.log('Reports Component State:', { 
+    reportType, 
+    currentPage, 
+    sortOrder, 
+    selectedCluster, 
+    searchTerm,
+    currentData: reportsData[reportType] || []
+  });
+
+  // Get current report data based on type
+  const getCurrentReportData = () => {
+    const data = reportsData[reportType] || [];
+    console.log(`Current ${reportType} data:`, data.length, 'items');
+    return data;
+  };
+
   // Filter and sort data
   const getFilteredData = () => {
-    return reportData.filter(item => {
+    const currentData = getCurrentReportData();
+    const filtered = currentData.filter(item => {
       const matchesSearch = searchTerm === '' || 
         (item.Name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
          item['Supply Name']?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -62,6 +76,15 @@ export function Reports() {
 
       return matchesSearch && matchesCluster;
     });
+    
+    console.log('Filtered data:', {
+      before: currentData.length,
+      after: filtered.length,
+      searchTerm,
+      selectedCluster
+    });
+
+    return filtered;
   };
 
   // Get sorted and paginated data
@@ -86,7 +109,7 @@ export function Reports() {
         : valueB.localeCompare(valueA);
     });
 
-    // Calculate pagination for filtered data
+    // Calculate pagination
     const totalFilteredItems = sortedData.length;
     const totalFilteredPages = Math.ceil(totalFilteredItems / itemsPerPage);
     const adjustedCurrentPage = Math.min(currentPage, totalFilteredPages);
@@ -110,93 +133,11 @@ export function Reports() {
     setSortOrder(current => current === 'asc' ? 'desc' : 'asc');
   };
 
-  // Modify the fetch report data function
-  useEffect(() => {
-    const fetchReportData = async () => {
-      setLoading(true);
-      try {
-        let collectionName = "";
-        switch (reportType) {
-          case "supplies":
-            collectionName = "supplies";
-            break;
-          case "deliveries":
-            collectionName = "deliveries";
-            break;
-          case "releases":
-            collectionName = "releases";
-            break;
-          default:
-            collectionName = "supplies";
-        }
-
-        const startDate = Timestamp.fromDate(dateRange.from);
-        const endDate = Timestamp.fromDate(dateRange.to);
-
-        const q = query(
-          collection(db, collectionName),
-          where("createdAt", ">=", startDate),
-          where("createdAt", "<=", endDate),
-          orderBy("createdAt", "desc")
-        );
-
-        const snapshot = await getDocs(q);
-        let data = [];
-
-        if (reportType === "supplies") {
-          data = snapshot.docs.map(doc => ({
-            ID: doc.id,
-            Name: doc.data().name || '-',
-            Classification: doc.data().classification || 'N/A',
-            Quantity: doc.data().quantity || 0,
-            Unit: doc.data().unit || 'pcs',
-            Cluster: doc.data().cluster || '-',
-            "Date Added": doc.data().createdAt?.toDate().toLocaleString() || '-'
-          }));
-        } else if (reportType === "deliveries") {
-          data = snapshot.docs.map(doc => ({
-            ID: doc.id,
-            "Supply Name": doc.data().supplyName || '-',
-            Classification: doc.data().classification || 'N/A',
-            Quantity: doc.data().quantity || 0,
-            "Delivered By": doc.data().deliveredBy || '-',
-            Notes: doc.data().notes || '-',
-            "Date & Time": doc.data().createdAt?.toDate().toLocaleString() || '-'
-          }));
-        } else if (reportType === "releases") {
-          data = snapshot.docs.map(doc => ({
-            ID: doc.id,
-            "Supply Name": doc.data().supplyName || '-',
-            Classification: doc.data().classification || 'N/A',
-            Quantity: doc.data().quantity || 0,
-            "Received By": doc.data().receivedBy || '-',
-            Department: doc.data().department || '-',
-            Purpose: doc.data().purpose || '-',
-            "Date Released": doc.data().createdAt?.toDate().toLocaleString() || '-'
-          }));
-        }
-
-        setReportData(data);
-      } catch (error) {
-        console.error("Error fetching report data:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchReportData();
-  }, [reportType, dateRange]);
-
   // Generate Excel report
   const generateExcel = () => {
     try {
-      // Filter out the date column from the data
-      const filteredData = reportData.map(item => {
-        const { ['Date Added']: dateAdded, ...rest } = item;
-        return rest;
-      });
-
-      const worksheet = XLSX.utils.json_to_sheet(filteredData);
+      const currentData = getCurrentReportData();
+      const worksheet = XLSX.utils.json_to_sheet(currentData);
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, "Report");
       
@@ -250,7 +191,7 @@ export function Reports() {
       doc.text(`Date Range: ${format(dateRange.from, 'MMM dd, yyyy')} to ${format(dateRange.to, 'MMM dd, yyyy')}`, pageWidth / 2, margin + 52, { align: 'center' });
       
       // Prepare table data without the date column
-      const filteredData = reportData.map(item => {
+      const filteredData = getCurrentReportData().map(item => {
         const { ['Date Added']: dateAdded, ...rest } = item;
         return rest;
       });
@@ -402,7 +343,7 @@ export function Reports() {
           <div className="flex gap-2">
             <Button
               onClick={generateExcel}
-              disabled={loading || reportData.length === 0}
+              disabled={isLoading || getCurrentReportData().length === 0}
               className="flex-1 gap-2"
             >
               <FileText className="w-4 h-4" />
@@ -410,7 +351,7 @@ export function Reports() {
             </Button>
             <Button
               onClick={generatePDF}
-              disabled={loading || reportData.length === 0}
+              disabled={isLoading || getCurrentReportData().length === 0}
               className="flex-1 gap-2"
             >
               <FileIcon className="w-4 h-4" />
@@ -499,12 +440,12 @@ export function Reports() {
           </div>
         </div>
         <div className="p-6">
-          {loading ? (
+          {isLoading ? (
             <div className="text-center py-8">
               <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
               <p className="text-gray-500 dark:text-gray-400">Loading report data...</p>
             </div>
-          ) : reportData.length === 0 ? (
+          ) : getCurrentReportData().length === 0 ? (
             <div className="text-center py-8 text-gray-500 dark:text-gray-400">
               No data available for the selected criteria
             </div>
@@ -514,7 +455,7 @@ export function Reports() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      {Object.keys(reportData[0]).map((header) => (
+                      {Object.keys(getCurrentReportData()[0] || {}).map((header) => (
                         <TableHead key={header}>
                           {header}
                         </TableHead>

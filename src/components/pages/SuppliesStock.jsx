@@ -29,7 +29,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "../ui/alert-dialog";
-import { Card } from "../ui/card";
+import { Card, CardContent } from "../ui/card";
 import { toast } from "sonner";
 import { uploadImage } from "../../lib/cloudinary";
 import { 
@@ -61,7 +61,7 @@ import {
   clusters,
   addClassification
 } from "../../lib/firebase";
-import { collection, onSnapshot, query, orderBy, where, addDoc } from "firebase/firestore";
+import { collection, query, orderBy, where, addDoc, getDocs, onSnapshot, limit, startAfter } from "firebase/firestore";
 import { Search, Plus, Pencil, Trash2, Package, Boxes, AlertTriangle, XCircle, Calendar, ArrowUpDown, FileText, Check } from "lucide-react";
 import { format } from "date-fns";
 import { Calendar as CalendarComponent } from "../ui/calendar";
@@ -75,8 +75,8 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "../ui/pagination";
-import React from "react"; // Added missing import for React
-import { cn } from "@/lib/utils"; // Added missing import for cn
+import React from "react";
+import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -84,11 +84,18 @@ import {
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
 import { Filter } from "lucide-react";
+import { useSupplies } from "../../lib/SuppliesContext";
 
 export function SuppliesStock() {
-  const [allSupplies, setAllSupplies] = useState([]); // Store all supplies
-  const [filteredSupplies, setFilteredSupplies] = useState([]); // Store filtered supplies
-  const [loading, setLoading] = useState(false);
+  const { 
+    allSupplies, 
+    units, 
+    classifications, 
+    isLoading: isContextLoading,
+    updateSupplyOptimized 
+  } = useSupplies();
+  const [filteredSupplies, setFilteredSupplies] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedImage, setSelectedImage] = useState(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -96,16 +103,20 @@ export function SuppliesStock() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedSupply, setSelectedSupply] = useState(null);
   const [newUnitDialogOpen, setNewUnitDialogOpen] = useState(false);
-  const [units, setUnits] = useState([]);
   const [newUnit, setNewUnit] = useState("");
   const [selectedDate, setSelectedDate] = useState(null);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
-  const [classifications, setClassifications] = useState([]);
   const [newClassification, setNewClassification] = useState("");
   const [newClassificationDialogOpen, setNewClassificationDialogOpen] = useState(false);
   const [classificationSearchOpen, setClassificationSearchOpen] = useState(false);
   const [classificationSearchQuery, setClassificationSearchQuery] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 15;
+  const [sortOrder, setSortOrder] = useState('asc');
+  const [stockFilter, setStockFilter] = useState('all');
+  const [unitSearchOpen, setUnitSearchOpen] = useState(false);
+  const [unitSearchQuery, setUnitSearchQuery] = useState("");
   
   const [newSupply, setNewSupply] = useState({
     name: "",
@@ -126,12 +137,9 @@ export function SuppliesStock() {
     classification: "", // Add classification field
   });
   const [isLoading, setIsLoading] = useState(true);
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 15; // Changed from 20 to 15
-  const [sortOrder, setSortOrder] = useState('asc'); // Add sort order state
-  const [stockFilter, setStockFilter] = useState('all'); // Add stock filter state
-  const [unitSearchOpen, setUnitSearchOpen] = useState(false);
-  const [unitSearchQuery, setUnitSearchQuery] = useState("");
+  const [lastDoc, setLastDoc] = useState(null);
+  const [hasMore, setHasMore] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   
   // Filter units based on search query
   const filteredUnits = units.filter(unit =>
@@ -142,6 +150,19 @@ export function SuppliesStock() {
   const filteredClassifications = classifications.filter(classification =>
     classification.name.toLowerCase().includes(classificationSearchQuery.toLowerCase())
   );
+
+  // Debug logs
+  console.log('Context Data:', { allSupplies, units, classifications, isContextLoading });
+  console.log('Component State:', { filteredSupplies, loading, currentPage });
+
+  // Initialize filteredSupplies when allSupplies changes
+  useEffect(() => {
+    console.log('allSupplies changed:', allSupplies);
+    if (allSupplies && allSupplies.length > 0) {
+      setFilteredSupplies(allSupplies);
+      setLoading(false);
+    }
+  }, [allSupplies]);
 
   // Calculate pagination values
   const totalPages = Math.ceil(filteredSupplies.length / itemsPerPage);
@@ -154,66 +175,9 @@ export function SuppliesStock() {
     setCurrentPage(1);
   }, [searchTerm, selectedDate]);
 
-  // Fetch units from Firebase
+  // Local search and filter function
   useEffect(() => {
-    const q = query(collection(db, "units"), orderBy("name"));
-    
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const unitsData = [];
-      snapshot.forEach((doc) => {
-        unitsData.push({ id: doc.id, ...doc.data() });
-      });
-      setUnits(unitsData);
-    }, (error) => {
-      console.error("Error fetching units:", error);
-      toast.error("Failed to fetch units");
-    });
-
-    return () => unsubscribe();
-  }, []);
-
-  // Fetch classifications from Firebase
-  useEffect(() => {
-    const q = query(collection(db, "classifications"), orderBy("name"));
-    
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const classificationsData = [];
-      snapshot.forEach((doc) => {
-        classificationsData.push({ id: doc.id, ...doc.data() });
-      });
-      setClassifications(classificationsData);
-    }, (error) => {
-      console.error("Error fetching classifications:", error);
-      toast.error("Failed to fetch classifications");
-    });
-
-    return () => unsubscribe();
-  }, []);
-
-  // Main data subscription
-  useEffect(() => {
-    const q = query(collection(db, "supplies"), orderBy("id", "desc"));
-    
-    setIsLoading(true);
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const suppliesData = [];
-      snapshot.forEach((doc) => {
-        suppliesData.push({ id: doc.id, ...doc.data() });
-      });
-      setAllSupplies(suppliesData);
-      setFilteredSupplies(suppliesData); // Initialize filtered supplies with all supplies
-      setIsLoading(false);
-    }, (error) => {
-      console.error("Error fetching supplies:", error);
-      toast.error("Failed to fetch supplies");
-      setIsLoading(false);
-    });
-
-    return () => unsubscribe();
-  }, []);
-
-  // Modified search effect to include date filtering
-  useEffect(() => {
+    console.log('Applying filters:', { searchTerm, selectedDate, stockFilter, sortOrder });
     let filtered = allSupplies;
 
     if (searchTerm.trim()) {
@@ -248,17 +212,34 @@ export function SuppliesStock() {
         break;
     }
 
-    // Sort the filtered supplies
+    // Apply sort
     filtered = [...filtered].sort((a, b) => {
-      const nameA = a.name.charAt(0).toLowerCase();
-      const nameB = b.name.charAt(0).toLowerCase();
-      return sortOrder === 'asc' 
-        ? nameA.localeCompare(nameB)
-        : nameB.localeCompare(nameA);
+      const nameA = a.name.toLowerCase();
+      const nameB = b.name.toLowerCase();
+      return sortOrder === 'asc' ? nameA.localeCompare(nameB) : nameB.localeCompare(nameA);
     });
-    
+
+    console.log('Filtered results:', filtered.length);
     setFilteredSupplies(filtered);
-  }, [searchTerm, allSupplies, selectedDate, sortOrder, stockFilter]); // Add stockFilter to dependencies
+    setCurrentPage(1); // Reset to first page when filters change
+  }, [searchTerm, selectedDate, stockFilter, allSupplies, sortOrder]);
+
+  // Render load more button
+  const renderLoadMore = () => {
+    if (!hasMore) return null;
+    
+    return (
+      <div className="flex justify-center mt-4">
+        <Button
+          variant="outline"
+          onClick={loadMore}
+          disabled={isLoadingMore}
+        >
+          {isLoadingMore ? "Loading..." : "Load More"}
+        </Button>
+      </div>
+    );
+  };
 
   const handleImageChange = (e) => {
     const file = e.target.files[0];
@@ -368,7 +349,7 @@ export function SuppliesStock() {
         availability: parseInt(editSupply.quantity),
       };
 
-      const newId = await updateSupply(editSupply.id, updatedData);
+      const newId = await updateSupplyOptimized(editSupply.id, updatedData);
 
       setEditDialogOpen(false);
       setSelectedImage(null);
@@ -1079,6 +1060,7 @@ export function SuppliesStock() {
                     <TableHead className="min-w-[200px]">Name</TableHead>
                     <TableHead className="w-[150px]">Classification</TableHead>
                     <TableHead className="w-[100px]">Quantity</TableHead>
+                    <TableHead className="w-[100px]">Availability</TableHead>
                     <TableHead className="w-[100px]">Unit</TableHead>
                     <TableHead className="w-[100px]">Cluster</TableHead>
                     <TableHead className="min-w-[180px]">Date Added</TableHead>
@@ -1086,34 +1068,18 @@ export function SuppliesStock() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {isLoading ? (
-                    // Loading skeletons
+                  {loading || isContextLoading ? (
                     Array(5).fill(null).map((_, index) => (
                       <TableRow key={`loading-${index}`}>
-                        <TableCell>
-                          <Skeleton className="h-6 w-16" />
-                        </TableCell>
-                        <TableCell>
-                          <Skeleton className="h-10 w-10 rounded-full" />
-                        </TableCell>
-                        <TableCell>
-                          <Skeleton className="h-6 w-32" />
-                        </TableCell>
-                        <TableCell>
-                          <Skeleton className="h-6 w-32" />
-                        </TableCell>
-                        <TableCell>
-                          <Skeleton className="h-6 w-16" />
-                        </TableCell>
-                        <TableCell>
-                          <Skeleton className="h-6 w-20" />
-                        </TableCell>
-                        <TableCell>
-                          <Skeleton className="h-6 w-24" />
-                        </TableCell>
-                        <TableCell>
-                          <Skeleton className="h-6 w-32" />
-                        </TableCell>
+                        <TableCell><Skeleton className="h-6 w-16" /></TableCell>
+                        <TableCell><Skeleton className="h-10 w-10 rounded-full" /></TableCell>
+                        <TableCell><Skeleton className="h-6 w-32" /></TableCell>
+                        <TableCell><Skeleton className="h-6 w-32" /></TableCell>
+                        <TableCell><Skeleton className="h-6 w-16" /></TableCell>
+                        <TableCell><Skeleton className="h-6 w-16" /></TableCell>
+                        <TableCell><Skeleton className="h-6 w-20" /></TableCell>
+                        <TableCell><Skeleton className="h-6 w-24" /></TableCell>
+                        <TableCell><Skeleton className="h-6 w-32" /></TableCell>
                         <TableCell>
                           <div className="flex gap-2 justify-end">
                             <Skeleton className="h-9 w-9" />
@@ -1124,7 +1090,7 @@ export function SuppliesStock() {
                     ))
                   ) : currentSupplies.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={9} className="text-center py-8 text-gray-500 dark:text-gray-400">
+                      <TableCell colSpan={10} className="text-center py-8 text-gray-500 dark:text-gray-400">
                         No supplies found
                       </TableCell>
                     </TableRow>
@@ -1158,13 +1124,21 @@ export function SuppliesStock() {
                         <TableCell>
                           <span className={cn(
                             "px-2.5 py-1 rounded-md font-medium",
-                            supply.quantity === 0 
+                            "bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400"
+                          )}>
+                            {supply.quantity}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <span className={cn(
+                            "px-2.5 py-1 rounded-md font-medium",
+                            (supply.availability ?? supply.quantity) === 0 
                               ? "bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400" 
-                              : supply.quantity < 10
+                              : (supply.availability ?? supply.quantity) < 10
                               ? "bg-yellow-50 dark:bg-yellow-900/20 text-yellow-600 dark:text-yellow-400"
                               : "bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400"
                           )}>
-                            {supply.quantity}
+                            {supply.availability ?? supply.quantity}
                           </span>
                         </TableCell>
                         <TableCell>{supply.unit}</TableCell>
@@ -1207,7 +1181,7 @@ export function SuppliesStock() {
           </div>
 
           {/* Pagination */}
-          {!isLoading && filteredSupplies.length > 0 && (
+          {!loading && filteredSupplies.length > 0 && (
             <div className="mt-6 flex justify-between items-center">
               <div className="text-sm text-gray-500 dark:text-gray-400">
                 Showing {startIndex + 1} to {Math.min(endIndex, filteredSupplies.length)} of {filteredSupplies.length} supplies

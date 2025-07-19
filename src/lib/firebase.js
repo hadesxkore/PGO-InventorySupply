@@ -48,13 +48,13 @@ async function getNextIdForCluster(cluster) {
 
   const snapshot = await getDocs(q);
   if (snapshot.empty) {
-    return `${cluster}-001`; // First item in this cluster
+    return `${cluster}-0001`; // First item in this cluster
   }
 
   const lastId = snapshot.docs[0].data().id;
   const lastNumber = parseInt(lastId.split('-')[1]);
   const nextNumber = lastNumber + 1;
-  return `${cluster}-${nextNumber.toString().padStart(3, '0')}`;
+  return `${cluster}-${nextNumber.toString().padStart(4, '0')}`;
 }
 
 // Supply Collection Functions
@@ -109,7 +109,11 @@ export const getSupplies = async (lastDoc = null, itemsPerPage = 20) => {
 export const updateSupply = async (id, updatedData) => {
   try {
     const supplyRef = doc(db, "supplies", id);
-    const currentSupply = (await getDoc(supplyRef)).data();
+    const supplyDoc = await getDoc(supplyRef);
+    if (!supplyDoc.exists()) {
+      throw new Error("Supply not found!");
+    }
+    const currentSupply = supplyDoc.data();
 
     // If cluster is being changed, we need to update the ID
     if (updatedData.cluster && currentSupply.cluster !== updatedData.cluster) {
@@ -119,13 +123,31 @@ export const updateSupply = async (id, updatedData) => {
       // Create new document with new ID
       const newSupplyRef = doc(db, "supplies", newId);
       
-      // Merge current data with updates and new ID
-      await setDoc(newSupplyRef, {
-        ...currentSupply,
-        ...updatedData,
-        id: newId,
-        dateUpdated: serverTimestamp()
+      // Prepare the updated data, ensuring no undefined values
+      const updatedSupplyData = {
+        ...currentSupply,  // Start with all current data
+        ...updatedData,    // Override with new data
+        id: newId,         // Set new ID
+        dateUpdated: serverTimestamp(),
+        // Ensure these fields are never undefined
+        name: updatedData.name || currentSupply.name,
+        quantity: updatedData.quantity ?? currentSupply.quantity,
+        unit: updatedData.unit || currentSupply.unit,
+        cluster: updatedData.cluster,
+        classification: updatedData.classification || currentSupply.classification || 'N/A',
+        image: updatedData.image || currentSupply.image || '',
+        availability: updatedData.availability ?? updatedData.quantity ?? currentSupply.quantity
+      };
+
+      // Remove any undefined or null values
+      Object.keys(updatedSupplyData).forEach(key => {
+        if (updatedSupplyData[key] === undefined || updatedSupplyData[key] === null) {
+          delete updatedSupplyData[key];
+        }
       });
+      
+      // Create new document with new ID
+      await setDoc(newSupplyRef, updatedSupplyData);
 
       // Delete old document
       await deleteDoc(supplyRef);
@@ -133,8 +155,16 @@ export const updateSupply = async (id, updatedData) => {
       return newId; // Return new ID for UI update
     } else {
       // If cluster isn't changing, just update normally
+      // Remove any undefined values from updatedData
+      const cleanUpdatedData = { ...updatedData };
+      Object.keys(cleanUpdatedData).forEach(key => {
+        if (cleanUpdatedData[key] === undefined || cleanUpdatedData[key] === null) {
+          delete cleanUpdatedData[key];
+        }
+      });
+
       await updateDoc(supplyRef, {
-        ...updatedData,
+        ...cleanUpdatedData,
         dateUpdated: serverTimestamp()
       });
       return id;
