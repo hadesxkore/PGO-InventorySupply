@@ -433,7 +433,7 @@ export function Dashboard() {
               {/* Header with Logo */}
               <div className="text-center space-y-3">
                 <div className="flex justify-center">
-                  <img src="images/bataan-logo.png" alt="Bataan Logo" className="h-16 w-16 object-contain" />
+                  <img src="/images/bataan-logo.png" alt="Bataan Logo" className="h-16 w-16 object-contain" />
                 </div>
                 <h2 className="text-xl font-bold text-blue-700">PROVINCIAL GOVERNMENT OF BATAAN</h2>
                 <p className="text-base text-gray-600">OFFICE OF THE PROVINCIAL GOVERNOR</p>
@@ -557,7 +557,7 @@ export function Dashboard() {
               {/* Header with Logo */}
               <div className="text-center space-y-3">
                 <div className="flex justify-center">
-                  <img src="images/bataan-logo.png" alt="Bataan Logo" className="h-16 w-16 object-contain" />
+                  <img src="/images/bataan-logo.png" alt="Bataan Logo" className="h-16 w-16 object-contain" />
                 </div>
                 <h2 className="text-xl font-bold text-blue-700">PROVINCIAL GOVERNMENT OF BATAAN</h2>
                 <p className="text-base text-gray-600">OFFICE OF THE PROVINCIAL GOVERNOR</p>
