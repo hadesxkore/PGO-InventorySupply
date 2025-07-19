@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react";
-import { motion } from "framer-motion";
+import { useState, useEffect, useRef } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
+import { Dialog, DialogContent } from "./ui/dialog";
 import { useNavigate } from "react-router-dom";
 import {
   LineChart,
@@ -31,11 +32,13 @@ import {
   Activity,
   Box,
   Truck,
-  Share
+  Share,
+  Maximize2
 } from "lucide-react";
 
 export function Dashboard() {
   const navigate = useNavigate();
+  const chartRef = useRef(null);
   // State for various dashboard data
   const [stats, setStats] = useState({
     totalSupplies: 0,
@@ -300,30 +303,95 @@ export function Dashboard() {
           variants={itemVariants}
           className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700"
         >
-          <h3 className="text-lg font-semibold text-gray-800 dark:text-white mb-4">Stock Movement</h3>
-          <div className="h-[300px]">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h3 className="text-lg font-semibold text-gray-800 dark:text-white">Inventory Status</h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Overview of current inventory state</p>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full bg-blue-500"></div>
+                <span className="text-sm text-gray-600 dark:text-gray-300">Total Supplies</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full bg-green-500"></div>
+                <span className="text-sm text-gray-600 dark:text-gray-300">Total Deliveries</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full bg-red-500"></div>
+                <span className="text-sm text-gray-600 dark:text-gray-300">Total Releases</span>
+              </div>
+            </div>
+          </div>
+          <div className="h-[300px]" ref={chartRef}>
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={stockMovement}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="date" />
-                <YAxis />
-                <Tooltip />
-                <Legend />
-                <Line
-                  type="monotone"
-                  dataKey="quantity"
-                  stroke={CHART_COLORS.blue[1]}
-                  strokeWidth={2}
-                  dot={{ fill: CHART_COLORS.blue[1] }}
+              <BarChart
+                data={[
+                  {
+                    name: 'Current Status',
+                    totalSupplies: stats.totalSupplies,
+                    totalDeliveries: stats.totalDeliveries,
+                    totalReleases: stats.totalReleases
+                  }
+                ]}
+                margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
+                barSize={80}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <XAxis 
+                  dataKey="name" 
+                  tick={{ fontSize: 14, fill: '#6B7280' }}
+                  tickLine={false}
+                  axisLine={false}
                 />
-                <Line
-                  type="monotone"
-                  dataKey="incoming"
-                  stroke={CHART_COLORS.green[1]}
-                  strokeWidth={2}
-                  dot={{ fill: CHART_COLORS.green[1] }}
+                <YAxis
+                  tick={{ fontSize: 14, fill: '#6B7280' }}
+                  tickLine={false}
+                  axisLine={false}
+                  width={60}
                 />
-              </LineChart>
+                <Tooltip
+                  content={({ active, payload }) => {
+                    if (active && payload && payload.length) {
+                      return (
+                        <div className="bg-white dark:bg-gray-800 p-4 shadow-lg rounded-lg border border-gray-200 dark:border-gray-700">
+                          <p className="font-semibold text-gray-900 dark:text-white mb-3">Current Status</p>
+                          <div className="space-y-2">
+                            <p className="text-sm text-blue-600 dark:text-blue-400 font-medium">
+                              Total Supplies: {payload[0]?.value || 0} items
+                            </p>
+                            <p className="text-sm text-green-600 dark:text-green-400 font-medium">
+                              Total Deliveries: {payload[1]?.value || 0} items
+                            </p>
+                            <p className="text-sm text-red-600 dark:text-red-400 font-medium">
+                              Total Releases: {payload[2]?.value || 0} items
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    }
+                    return null;
+                  }}
+                />
+                <Bar 
+                  dataKey="totalSupplies" 
+                  name="Total Supplies"
+                  fill={CHART_COLORS.blue[1]} 
+                  radius={[4, 4, 0, 0]}
+                />
+                <Bar 
+                  dataKey="totalDeliveries" 
+                  name="Total Deliveries"
+                  fill={CHART_COLORS.green[1]} 
+                  radius={[4, 4, 0, 0]}
+                />
+                <Bar 
+                  dataKey="totalReleases" 
+                  name="Total Releases"
+                  fill={CHART_COLORS.red[1]} 
+                  radius={[4, 4, 0, 0]}
+                />
+              </BarChart>
             </ResponsiveContainer>
           </div>
         </motion.div>

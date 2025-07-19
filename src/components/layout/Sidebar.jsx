@@ -17,8 +17,7 @@ import {
   ChevronRight,
   Sun,
   Moon,
-  Share2,
-  FileOutput
+  Share2
 } from "lucide-react";
 
 export function Sidebar() {
@@ -40,7 +39,6 @@ export function Sidebar() {
     { name: 'Delivery', icon: Truck, path: '/delivery' },
     { name: 'Supplies/Stock', icon: Package, path: '/supplies' },
     { name: 'Release Supply', icon: Share2, path: '/release-supply' },
-    { name: 'Generate/Export', icon: FileOutput, path: '/generate-export' },
     { name: 'Reports', icon: FileText, path: '/reports' },
     { name: 'Account', icon: User, path: '/account' },
   ];

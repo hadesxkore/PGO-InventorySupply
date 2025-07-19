@@ -52,10 +52,12 @@ import {
   getDoc,
   updateDoc,
   runTransaction,
-  deleteDoc
+  deleteDoc,
+  serverTimestamp,
+  limit
 } from "firebase/firestore";
 import { db } from "../../lib/firebase";
-import { Search, Plus, Package, Pencil, Trash2, Calendar, ArrowUpDown } from "lucide-react";
+import { Search, Plus, Package, Pencil, Trash2, Calendar, ArrowUpDown, Check } from "lucide-react";
 import {
   Command,
   CommandEmpty,
@@ -71,6 +73,8 @@ import {
 import { cn } from "../../lib/utils";
 import { format } from "date-fns";
 import { Calendar as CalendarComponent } from "../ui/calendar";
+import React from "react"; // Added missing import for React
+import { Label } from "../ui/label";
 
 export function DeliveryPage() {
   const [allDeliveries, setAllDeliveries] = useState([]);
@@ -100,7 +104,8 @@ export function DeliveryPage() {
     supplyName: "",
     quantity: "",
     notes: "",
-    deliveredBy: ""
+    deliveredBy: "",
+    classification: "" // Add classification field
   });
 
   const [editDelivery, setEditDelivery] = useState({
@@ -109,8 +114,15 @@ export function DeliveryPage() {
     supplyName: "",
     quantity: "",
     notes: "",
-    deliveredBy: ""
+    deliveredBy: "",
+    classification: "" // Add classification field
   });
+
+  const [classifications, setClassifications] = useState([]);
+  const [classificationSearchOpen, setClassificationSearchOpen] = useState(false);
+  const [classificationSearchQuery, setClassificationSearchQuery] = useState("");
+  const [newClassificationDialogOpen, setNewClassificationDialogOpen] = useState(false);
+  const [newClassification, setNewClassification] = useState("");
 
   const [currentPage, setCurrentPage] = useState(1);
   const rowsPerPage = 15;
@@ -196,6 +208,50 @@ export function DeliveryPage() {
     return () => unsubscribe();
   }, []);
 
+  // Fetch classifications
+  useEffect(() => {
+    const q = query(collection(db, "classifications"), orderBy("name"));
+    
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const classificationsData = [];
+      snapshot.forEach((doc) => {
+        classificationsData.push({ id: doc.id, ...doc.data() });
+      });
+      setClassifications(classificationsData);
+    }, (error) => {
+      console.error("Error fetching classifications:", error);
+      toast.error("Failed to fetch classifications");
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Filter classifications based on search query
+  const filteredClassifications = classifications.filter(classification =>
+    classification.name.toLowerCase().includes(classificationSearchQuery.toLowerCase())
+  );
+
+  const handleAddClassification = async (e) => {
+    e.preventDefault();
+    if (!newClassification.trim()) {
+      toast.error("Please enter a classification name");
+      return;
+    }
+
+    try {
+      await addDoc(collection(db, "classifications"), {
+        name: newClassification.trim(),
+        createdAt: serverTimestamp()
+      });
+      setNewClassification("");
+      setNewClassificationDialogOpen(false);
+      toast.success("Classification added successfully");
+    } catch (error) {
+      console.error("Error adding classification:", error);
+      toast.error("Failed to add classification");
+    }
+  };
+
   // Modified search effect to include date filtering
   useEffect(() => {
     let filtered = allDeliveries;
@@ -239,44 +295,90 @@ export function DeliveryPage() {
 
   const handleAddDelivery = async (e) => {
     e.preventDefault();
+    
+    if (!newDelivery.supplyId || !newDelivery.supplyName) {
+      toast.error("Please select a supply");
+      return;
+    }
+
+    if (!newDelivery.quantity || parseInt(newDelivery.quantity) <= 0) {
+      toast.error("Please enter a valid quantity");
+      return;
+    }
+
+    if (!newDelivery.deliveredBy.trim()) {
+      toast.error("Please enter who delivered the supply");
+      return;
+    }
+
     setLoading(true);
 
     try {
       // Start a Firestore transaction
       await runTransaction(db, async (transaction) => {
         // Get the supply document
-        const supplyRef = doc(db, "supplies", selectedSupply);
+        const supplyRef = doc(db, "supplies", newDelivery.supplyId);
         const supplyDoc = await transaction.get(supplyRef);
 
         if (!supplyDoc.exists()) {
-          throw new Error("Supply not found!");
+          throw new Error("Supply not found");
         }
+
+        // Get all deliveries to determine the next ID
+        const deliveriesRef = collection(db, "deliveries");
+        const deliveriesQuery = query(deliveriesRef, orderBy("id", "desc"), limit(1));
+        const deliveriesSnapshot = await getDocs(deliveriesQuery);
+        
+        // Generate the next delivery ID
+        let nextNumber = 1;
+        if (!deliveriesSnapshot.empty) {
+          const lastDelivery = deliveriesSnapshot.docs[0].data();
+          const lastNumber = parseInt(lastDelivery.id.split('-')[1]);
+          nextNumber = lastNumber + 1;
+        }
+        const newDeliveryId = `DLV-${String(nextNumber).padStart(4, '0')}`;
 
         // Calculate new quantity
         const currentQuantity = supplyDoc.data().quantity || 0;
         const deliveryQuantity = parseInt(newDelivery.quantity);
         const newQuantity = currentQuantity + deliveryQuantity;
 
-        // Get the next delivery ID
-        const deliveriesRef = collection(db, "deliveries");
-        const deliveriesSnapshot = await getDocs(deliveriesRef);
-        const deliveryCount = deliveriesSnapshot.size;
-        const nextDeliveryId = String(deliveryCount + 1).padStart(5, '0');
-
-        // Create the delivery document
-        const deliveryData = {
-          id: nextDeliveryId,
-          ...newDelivery,
-          createdAt: Timestamp.now(),
-          updatedAt: Timestamp.now()
+        // Update supply quantity and classification
+        const updateData = {
+          quantity: newQuantity,
+          availability: newQuantity
         };
 
-        // Update both documents in the transaction
-        const newDeliveryRef = doc(collection(db, "deliveries"));
-        transaction.set(newDeliveryRef, deliveryData);
-        transaction.update(supplyRef, { 
-          quantity: newQuantity,
-          updatedAt: Timestamp.now()
+        // Only update classification if it's provided and different from current
+        if (newDelivery.classification && 
+            newDelivery.classification !== "N/A" && 
+            newDelivery.classification !== supplyDoc.data().classification) {
+          updateData.classification = newDelivery.classification;
+          
+          // If this is a new classification, add it to classifications collection
+          if (!classifications.some(c => c.name === newDelivery.classification)) {
+            const classificationRef = doc(collection(db, "classifications"));
+            transaction.set(classificationRef, {
+              name: newDelivery.classification,
+              createdAt: serverTimestamp()
+            });
+          }
+        }
+
+        // Update the supply document
+        transaction.update(supplyRef, updateData);
+
+        // Add delivery record with the new ID format
+        const deliveryRef = doc(db, "deliveries", newDeliveryId);
+        transaction.set(deliveryRef, {
+          id: newDeliveryId,
+          supplyId: newDelivery.supplyId,
+          supplyName: newDelivery.supplyName,
+          classification: newDelivery.classification || "N/A",
+          quantity: deliveryQuantity,
+          deliveredBy: newDelivery.deliveredBy.trim(),
+          notes: newDelivery.notes.trim(),
+          createdAt: serverTimestamp()
         });
       });
 
@@ -284,15 +386,17 @@ export function DeliveryPage() {
       setNewDelivery({
         supplyId: "",
         supplyName: "",
+        classification: "",
         quantity: "",
         notes: "",
         deliveredBy: ""
       });
-      setSelectedSupply(null);
-      toast.success("Delivery added and supply quantity updated successfully");
+      setCommandInputValue("");
+      setOpen(false);
+      toast.success("Delivery added successfully");
     } catch (error) {
       console.error("Error adding delivery:", error);
-      toast.error(error.message || "Failed to add delivery");
+      toast.error("Failed to add delivery: " + error.message);
     } finally {
       setLoading(false);
     }
@@ -305,7 +409,8 @@ export function DeliveryPage() {
       supplyName: delivery.supplyName,
       quantity: delivery.quantity,
       notes: delivery.notes,
-      deliveredBy: delivery.deliveredBy
+      deliveredBy: delivery.deliveredBy,
+      classification: delivery.classification // Add classification field
     });
     setSelectedSupply(delivery.supplyId);
     setEditDialogOpen(true);
@@ -401,116 +506,192 @@ export function DeliveryPage() {
                 Add Delivery
               </Button>
             </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Add New Delivery</DialogTitle>
-                <DialogDescription>
-                  Add a new delivery record to the system
-                </DialogDescription>
-              </DialogHeader>
-              <form onSubmit={handleAddDelivery} className="space-y-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Supply</label>
-                  <Popover open={open} onOpenChange={setOpen}>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        role="combobox"
-                        aria-expanded={open}
-                        className="w-full justify-between"
-                      >
-                        {selectedSupply
-                          ? supplies.find((supply) => supply.id === selectedSupply)?.name
-                          : "Select supply..."}
-                        <Package className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-full p-0">
-                      <Command>
-                        <CommandInput 
-                          placeholder="Search supplies..." 
-                          className="border-none focus:ring-0"
-                          value={commandInputValue}
-                          onValueChange={setCommandInputValue}
+            <DialogContent className="sm:max-w-[900px] p-0">
+              <div className="grid grid-cols-5 min-h-[600px]">
+                {/* Left Column - Supply Selection */}
+                <div className="col-span-2 bg-slate-50 dark:bg-slate-900/50 p-8 flex flex-col gap-6 border-r border-slate-200 dark:border-slate-800">
+                  <div className="flex-1 flex flex-col gap-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Package className="w-5 h-5 text-slate-600 dark:text-slate-400" />
+                      <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-200">Supply Selection</h3>
+                    </div>
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium text-slate-700 dark:text-slate-300">Select Supply</Label>
+                        <Popover open={open} onOpenChange={setOpen}>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="outline"
+                              role="combobox"
+                              aria-expanded={open}
+                              className="w-full justify-between bg-white dark:bg-slate-900"
+                            >
+                              {newDelivery.supplyName || "Select a supply..."}
+                              <span className="ml-2 opacity-50">⌄</span>
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-full p-0">
+                            <Command>
+                              <CommandInput
+                                placeholder="Search supplies..."
+                                value={commandInputValue}
+                                onValueChange={setCommandInputValue}
+                              />
+                              <CommandEmpty>No supply found.</CommandEmpty>
+                              <CommandGroup className="max-h-[200px] overflow-auto">
+                                {supplies.map((supply) => (
+                                  <CommandItem
+                                    key={supply.id}
+                                    value={supply.name}
+                                    onSelect={() => {
+                                      setNewDelivery({
+                                        ...newDelivery,
+                                        supplyId: supply.id,
+                                        supplyName: supply.name,
+                                        classification: supply.classification || "" // Get classification from supply
+                                      });
+                                      setOpen(false);
+                                    }}
+                                  >
+                                    {supply.name}
+                                  </CommandItem>
+                                ))}
+                              </CommandGroup>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium text-slate-700 dark:text-slate-300">Classification</Label>
+                        <Popover open={classificationSearchOpen} onOpenChange={setClassificationSearchOpen}>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="outline"
+                              role="combobox"
+                              aria-expanded={classificationSearchOpen}
+                              className="w-full justify-between bg-white dark:bg-slate-900"
+                            >
+                              {newDelivery.classification || "Select a classification..."}
+                              <span className="ml-2 opacity-50">⌄</span>
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-full p-0">
+                            <Command>
+                              <CommandInput
+                                placeholder="Search classification..."
+                                value={classificationSearchQuery}
+                                onValueChange={setClassificationSearchQuery}
+                              />
+                              <CommandEmpty>No classification found.</CommandEmpty>
+                              <CommandGroup className="max-h-[200px] overflow-auto">
+                                {filteredClassifications.map((classification) => (
+                                  <CommandItem
+                                    key={classification.id}
+                                    value={classification.name}
+                                    onSelect={(value) => {
+                                      setNewDelivery({ ...newDelivery, classification: value });
+                                      setClassificationSearchOpen(false);
+                                    }}
+                                  >
+                                    {classification.name}
+                                  </CommandItem>
+                                ))}
+                              </CommandGroup>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setNewClassificationDialogOpen(true)}
+                          className="w-full mt-2 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
+                        >
+                          <Plus className="w-4 h-4 mr-1" />
+                          Add New Classification
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right Column - Delivery Details */}
+                <div className="col-span-3 p-8">
+                  <DialogHeader className="mb-8">
+                    <DialogTitle className="text-2xl font-bold text-slate-900 dark:text-slate-200">Add New Delivery</DialogTitle>
+                    <DialogDescription className="text-base text-slate-500 dark:text-slate-400">
+                      Enter the delivery details below
+                    </DialogDescription>
+                  </DialogHeader>
+
+                  <form onSubmit={handleAddDelivery} className="space-y-8">
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-2">
+                        <Package className="w-5 h-5 text-slate-600 dark:text-slate-400" />
+                        <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-200">Delivery Details</h3>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label className="text-sm font-medium text-slate-700 dark:text-slate-300">Quantity</Label>
+                          <Input
+                            type="number"
+                            min="1"
+                            required
+                            className="h-[38px] bg-white dark:bg-slate-900"
+                            value={newDelivery.quantity}
+                            onChange={(e) => setNewDelivery({ ...newDelivery, quantity: e.target.value })}
+                            placeholder="Enter quantity"
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label className="text-sm font-medium text-slate-700 dark:text-slate-300">Delivered By</Label>
+                          <Input
+                            required
+                            className="h-[38px] bg-white dark:bg-slate-900"
+                            value={newDelivery.deliveredBy}
+                            onChange={(e) => setNewDelivery({ ...newDelivery, deliveredBy: e.target.value })}
+                            placeholder="Enter name"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium text-slate-700 dark:text-slate-300">Notes</Label>
+                        <Input
+                          className="h-[38px] bg-white dark:bg-slate-900"
+                          value={newDelivery.notes}
+                          onChange={(e) => setNewDelivery({ ...newDelivery, notes: e.target.value })}
+                          placeholder="Add any additional notes"
                         />
-                        <CommandEmpty>No supply found.</CommandEmpty>
-                        <CommandGroup className="max-h-[300px] overflow-auto">
-                          {supplies.length > 5 && !commandInputValue ? (
-                            <>
-                              {supplies.slice(0, 5).map((supply) => (
-                                <CommandItem
-                                  key={supply.id}
-                                  onSelect={() => {
-                                    setSelectedSupply(supply.id);
-                                    setNewDelivery(prev => ({
-                                      ...prev,
-                                      supplyId: supply.id,
-                                      supplyName: supply.name
-                                    }));
-                                    setOpen(false);
-                                  }}
-                                >
-                                  {supply.name}
-                                </CommandItem>
-                              ))}
-                              <div className="py-2 px-3 text-sm text-gray-500 dark:text-gray-400 text-center border-t border-gray-100 dark:border-gray-800">
-                                Type to search more supplies...
-                              </div>
-                            </>
-                          ) : (
-                            supplies.map((supply) => (
-                              <CommandItem
-                                key={supply.id}
-                                onSelect={() => {
-                                  setSelectedSupply(supply.id);
-                                  setNewDelivery(prev => ({
-                                    ...prev,
-                                    supplyId: supply.id,
-                                    supplyName: supply.name
-                                  }));
-                                  setOpen(false);
-                                }}
-                              >
-                                {supply.name}
-                              </CommandItem>
-                            ))
-                          )}
-                        </CommandGroup>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
+                      </div>
+                    </div>
+
+                    <div className="pt-6 border-t border-slate-200 dark:border-slate-800">
+                      <Button 
+                        type="submit" 
+                        size="lg" 
+                        className="w-full h-12 text-base font-medium bg-blue-600 hover:bg-blue-700" 
+                        disabled={loading}
+                      >
+                        {loading ? (
+                          <>
+                            <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                            Adding Delivery...
+                          </>
+                        ) : (
+                          <>
+                            <Plus className="w-5 h-5 mr-1" />
+                            Add Delivery
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </form>
                 </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Quantity</label>
-                  <Input
-                    type="number"
-                    value={newDelivery.quantity}
-                    onChange={(e) => setNewDelivery(prev => ({ ...prev, quantity: e.target.value }))}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Delivered By</label>
-                  <Input
-                    type="text"
-                    value={newDelivery.deliveredBy}
-                    onChange={(e) => setNewDelivery(prev => ({ ...prev, deliveredBy: e.target.value }))}
-                    placeholder="Enter name of delivery person"
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Notes</label>
-                  <Input
-                    value={newDelivery.notes}
-                    onChange={(e) => setNewDelivery(prev => ({ ...prev, notes: e.target.value }))}
-                    placeholder="Additional notes..."
-                  />
-                </div>
-                <Button type="submit" className="w-full" disabled={loading}>
-                  {loading ? "Adding..." : "Add Delivery"}
-                </Button>
-              </form>
+              </div>
             </DialogContent>
           </Dialog>
         </div>
@@ -647,252 +828,347 @@ export function DeliveryPage() {
           </div>
         </div>
 
-        {/* Table Section */}
+        {/* Table section */}
         <div className="p-4">
-          <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>ID</TableHead>
-                  <TableHead>Supply Name</TableHead>
-                  <TableHead>Quantity</TableHead>
-                  <TableHead>Delivered By</TableHead>
-                  <TableHead>Notes</TableHead>
-                  <TableHead>Date & Time</TableHead>
-                  <TableHead>Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {loading ? (
-                  // Loading skeletons
-                  Array(5).fill(null).map((_, index) => (
-                    <TableRow key={`loading-${index}`}>
-                      <TableCell>
-                        <Skeleton className="h-6 w-16" />
-                      </TableCell>
-                      <TableCell>
-                        <Skeleton className="h-6 w-32" />
-                      </TableCell>
-                      <TableCell>
-                        <Skeleton className="h-6 w-16" />
-                      </TableCell>
-                      <TableCell>
-                        <Skeleton className="h-6 w-24" />
-                      </TableCell>
-                      <TableCell>
-                        <Skeleton className="h-6 w-40" />
-                      </TableCell>
-                      <TableCell>
-                        <Skeleton className="h-6 w-32" />
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex gap-2">
-                          <Skeleton className="h-9 w-9" />
-                          <Skeleton className="h-9 w-9" />
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                ) : filteredDeliveries.length === 0 ? (
+          <div className="rounded-lg border border-gray-200 dark:border-gray-700">
+            <div className="max-h-[600px] overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600 scrollbar-track-gray-100 dark:scrollbar-track-gray-800 scrollbar-thumb-rounded-full scrollbar-track-rounded-full">
+              <Table>
+                <TableHeader className="sticky top-0 bg-white dark:bg-gray-800 shadow-sm z-10">
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-8 text-gray-500 dark:text-gray-400">
-                      No deliveries found
-                    </TableCell>
+                    <TableHead className="w-[120px]">ID</TableHead>
+                    <TableHead className="min-w-[200px]">Supply Name</TableHead>
+                    <TableHead className="w-[150px]">Classification</TableHead>
+                    <TableHead className="w-[100px]">Quantity</TableHead>
+                    <TableHead className="min-w-[150px]">Delivered By</TableHead>
+                    <TableHead className="min-w-[180px]">Date & Time</TableHead>
+                    <TableHead className="min-w-[200px]">Notes</TableHead>
+                    <TableHead className="w-[180px] text-right pr-4">Actions</TableHead>
                   </TableRow>
-                ) : (
-                  currentDeliveries.map((delivery) => (
-                    <TableRow key={delivery.id}>
-                      <TableCell className="font-mono">{delivery.id}</TableCell>
-                      <TableCell>
-                        <span className="px-2.5 py-1 rounded-md bg-blue-50 dark:bg-blue-900/20 font-medium">
-                          {delivery.supplyName}
-                        </span>
-                      </TableCell>
-                      <TableCell>
-                        <span className="px-2.5 py-1 rounded-md bg-green-50 dark:bg-green-900/20 font-medium">
-                          {delivery.quantity}
-                        </span>
-                      </TableCell>
-                      <TableCell>{delivery.deliveredBy}</TableCell>
-                      <TableCell>{delivery.notes}</TableCell>
-                      <TableCell>
-                        {delivery.createdAt?.toDate().toLocaleString()}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex gap-2">
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => handleEdit(delivery)}
-                            className="bg-blue-600 hover:bg-blue-700 text-white gap-2"
-                          >
-                            <Pencil className="w-4 h-4" />
-                            Edit
-                          </Button>
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => handleDelete(delivery)}
-                            className="bg-red-600 hover:bg-red-700 text-white gap-2"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                            Delete
-                          </Button>
-                        </div>
+                </TableHeader>
+                <TableBody>
+                  {loading ? (
+                    // Loading skeletons
+                    Array(5).fill(null).map((_, index) => (
+                      <TableRow key={`loading-${index}`}>
+                        <TableCell><Skeleton className="h-6 w-16" /></TableCell>
+                        <TableCell><Skeleton className="h-6 w-32" /></TableCell>
+                        <TableCell><Skeleton className="h-6 w-16" /></TableCell>
+                        <TableCell><Skeleton className="h-6 w-24" /></TableCell>
+                        <TableCell><Skeleton className="h-6 w-32" /></TableCell>
+                        <TableCell><Skeleton className="h-6 w-32" /></TableCell>
+                        <TableCell>
+                          <div className="flex gap-2 justify-end">
+                            <Skeleton className="h-9 w-9" />
+                            <Skeleton className="h-9 w-9" />
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  ) : currentDeliveries.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={8} className="text-center py-8 text-gray-500 dark:text-gray-400">
+                        No deliveries found
                       </TableCell>
                     </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
+                  ) : (
+                    currentDeliveries.map((delivery) => (
+                      <TableRow key={delivery.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                        <TableCell className="font-mono">{delivery.id}</TableCell>
+                        <TableCell>
+                          <span className="px-2.5 py-1 rounded-md bg-blue-50 dark:bg-blue-900/20 font-medium">
+                            {delivery.supplyName}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <span className="px-2.5 py-1 rounded-md bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 font-medium">
+                            {delivery.classification || "N/A"}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <span className="px-2.5 py-1 rounded-md bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 font-medium">
+                            {delivery.quantity}
+                          </span>
+                        </TableCell>
+                        <TableCell>{delivery.deliveredBy}</TableCell>
+                        <TableCell>{delivery.createdAt?.toDate().toLocaleString()}</TableCell>
+                        <TableCell>{delivery.notes || '-'}</TableCell>
+                        <TableCell>
+                          <div className="flex gap-2 justify-end">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => handleEdit(delivery)}
+                              className="bg-blue-600 hover:bg-blue-700 text-white gap-2"
+                            >
+                              <Pencil className="w-4 h-4" />
+                              Edit
+                            </Button>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => handleDelete(delivery)}
+                              className="bg-red-600 hover:bg-red-700 text-white gap-2"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                              Delete
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
           </div>
 
-          {/* Pagination - only show if there are more than 15 items */}
-          {filteredDeliveries.length > rowsPerPage && (
-            <div className="mt-4 flex justify-center">
-              <Pagination>
-                <PaginationContent>
-                  <PaginationItem>
-                    <PaginationPrevious
-                      onClick={() => handlePageChange(currentPage - 1)}
-                      disabled={currentPage === 1}
-                    />
-                  </PaginationItem>
-                  {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
-                    <PaginationItem key={page}>
-                      <PaginationLink
-                        onClick={() => handlePageChange(page)}
-                        isActive={currentPage === page}
-                      >
-                        {page}
-                      </PaginationLink>
-                    </PaginationItem>
-                  ))}
-                  <PaginationItem>
-                    <PaginationNext
-                      onClick={() => handlePageChange(currentPage + 1)}
-                      disabled={currentPage === totalPages}
-                    />
-                  </PaginationItem>
-                </PaginationContent>
-              </Pagination>
+          {/* Pagination */}
+          {!loading && filteredDeliveries.length > 0 && (
+            <div className="mt-6 flex justify-between items-center">
+              <div className="text-sm text-gray-500 dark:text-gray-400">
+                Showing {startIndex + 1} to {Math.min(endIndex, filteredDeliveries.length)} of {filteredDeliveries.length} deliveries
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                  disabled={currentPage === 1}
+                  className="gap-2"
+                >
+                  Previous
+                </Button>
+
+                <div className="flex items-center gap-1">
+                  {Array.from({ length: totalPages }, (_, i) => i + 1)
+                    .filter(page => {
+                      if (page === 1 || page === totalPages) return true;
+                      if (page >= currentPage - 1 && page <= currentPage + 1) return true;
+                      return false;
+                    })
+                    .map((page, i, arr) => (
+                      <React.Fragment key={page}>
+                        {i > 0 && arr[i - 1] !== page - 1 && (
+                          <span className="text-gray-400 dark:text-gray-600">...</span>
+                        )}
+                        <Button
+                          variant={currentPage === page ? "default" : "outline"}
+                          size="sm"
+                          onClick={() => setCurrentPage(page)}
+                          className={cn(
+                            "h-8 w-8 p-0",
+                            currentPage === page && "bg-blue-600 hover:bg-blue-700"
+                          )}
+                        >
+                          {page}
+                        </Button>
+                      </React.Fragment>
+                    ))}
+                </div>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                  disabled={currentPage === totalPages}
+                  className="gap-2"
+                >
+                  Next
+                </Button>
+              </div>
             </div>
           )}
         </div>
       </div>
 
-      {/* Edit Dialog */}
+      {/* Edit Delivery Dialog */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Edit Delivery</DialogTitle>
-            <DialogDescription>
-              Update the delivery record
-            </DialogDescription>
-          </DialogHeader>
-          <form onSubmit={handleEditSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Supply</label>
-              <Popover open={editOpen} onOpenChange={setEditOpen}>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    role="combobox"
-                    aria-expanded={editOpen}
-                    className="w-full justify-between"
-                  >
-                    {selectedSupply
-                      ? supplies.find((supply) => supply.id === selectedSupply)?.name
-                      : "Select supply..."}
-                    <Package className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-full p-0">
-                  <Command>
-                    <CommandInput 
-                      placeholder="Search supplies..." 
-                      className="border-none focus:ring-0"
-                      value={editCommandInputValue}
-                      onValueChange={setEditCommandInputValue}
+        <DialogContent className="sm:max-w-[900px] p-0">
+          <div className="grid grid-cols-5 min-h-[600px]">
+            {/* Left Column - Supply Selection */}
+            <div className="col-span-2 bg-slate-50 dark:bg-slate-900/50 p-8 flex flex-col gap-6 border-r border-slate-200 dark:border-slate-800">
+              <div className="flex-1 flex flex-col gap-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <Package className="w-5 h-5 text-slate-600 dark:text-slate-400" />
+                  <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-200">Supply Selection</h3>
+                </div>
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium text-slate-700 dark:text-slate-300">Select Supply</Label>
+                    <Popover open={editOpen} onOpenChange={setEditOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          role="combobox"
+                          aria-expanded={editOpen}
+                          className="w-full justify-between bg-white dark:bg-slate-900"
+                        >
+                          {editDelivery.supplyName || "Select a supply..."}
+                          <span className="ml-2 opacity-50">⌄</span>
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-full p-0">
+                        <Command>
+                          <CommandInput
+                            placeholder="Search supplies..."
+                            value={editCommandInputValue}
+                            onValueChange={setEditCommandInputValue}
+                          />
+                          <CommandEmpty>No supply found.</CommandEmpty>
+                          <CommandGroup className="max-h-[200px] overflow-auto">
+                            {supplies.map((supply) => (
+                              <CommandItem
+                                key={supply.id}
+                                value={supply.name}
+                                onSelect={() => {
+                                  setEditDelivery({
+                                    ...editDelivery,
+                                    supplyId: supply.id,
+                                    supplyName: supply.name,
+                                    classification: supply.classification || ""
+                                  });
+                                  setEditOpen(false);
+                                }}
+                              >
+                                {supply.name}
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium text-slate-700 dark:text-slate-300">Classification</Label>
+                    <Popover open={classificationSearchOpen} onOpenChange={setClassificationSearchOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          role="combobox"
+                          aria-expanded={classificationSearchOpen}
+                          className="w-full justify-between bg-white dark:bg-slate-900"
+                        >
+                          {editDelivery.classification || "Select a classification..."}
+                          <span className="ml-2 opacity-50">⌄</span>
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-full p-0">
+                        <Command>
+                          <CommandInput
+                            placeholder="Search classification..."
+                            value={classificationSearchQuery}
+                            onValueChange={setClassificationSearchQuery}
+                          />
+                          <CommandEmpty>No classification found.</CommandEmpty>
+                          <CommandGroup className="max-h-[200px] overflow-auto">
+                            {filteredClassifications.map((classification) => (
+                              <CommandItem
+                                key={classification.id}
+                                value={classification.name}
+                                onSelect={(value) => {
+                                  setEditDelivery({ ...editDelivery, classification: value });
+                                  setClassificationSearchOpen(false);
+                                }}
+                              >
+                                {classification.name}
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setNewClassificationDialogOpen(true)}
+                      className="w-full mt-2 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
+                    >
+                      <Plus className="w-4 h-4 mr-1" />
+                      Add New Classification
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Right Column - Delivery Details */}
+            <div className="col-span-3 p-8">
+              <DialogHeader className="mb-8">
+                <DialogTitle className="text-2xl font-bold text-slate-900 dark:text-slate-200">Edit Delivery</DialogTitle>
+                <DialogDescription className="text-base text-slate-500 dark:text-slate-400">
+                  Update the delivery details below
+                </DialogDescription>
+              </DialogHeader>
+
+              <form onSubmit={handleEditSubmit} className="space-y-8">
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <Package className="w-5 h-5 text-slate-600 dark:text-slate-400" />
+                    <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-200">Delivery Details</h3>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium text-slate-700 dark:text-slate-300">Quantity</Label>
+                      <Input
+                        type="number"
+                        min="1"
+                        required
+                        className="h-[38px] bg-white dark:bg-slate-900"
+                        value={editDelivery.quantity}
+                        onChange={(e) => setEditDelivery({ ...editDelivery, quantity: e.target.value })}
+                        placeholder="Enter quantity"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium text-slate-700 dark:text-slate-300">Delivered By</Label>
+                      <Input
+                        required
+                        className="h-[38px] bg-white dark:bg-slate-900"
+                        value={editDelivery.deliveredBy}
+                        onChange={(e) => setEditDelivery({ ...editDelivery, deliveredBy: e.target.value })}
+                        placeholder="Enter name"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium text-slate-700 dark:text-slate-300">Notes</Label>
+                    <Input
+                      className="h-[38px] bg-white dark:bg-slate-900"
+                      value={editDelivery.notes}
+                      onChange={(e) => setEditDelivery({ ...editDelivery, notes: e.target.value })}
+                      placeholder="Add any additional notes"
                     />
-                    <CommandEmpty>No supply found.</CommandEmpty>
-                    <CommandGroup className="max-h-[300px] overflow-auto">
-                      {supplies.length > 5 && !editCommandInputValue ? (
-                        <>
-                          {supplies.slice(0, 5).map((supply) => (
-                            <CommandItem
-                              key={supply.id}
-                              onSelect={() => {
-                                setSelectedSupply(supply.id);
-                                setEditDelivery(prev => ({
-                                  ...prev,
-                                  supplyId: supply.id,
-                                  supplyName: supply.name
-                                }));
-                                setEditOpen(false);
-                              }}
-                            >
-                              {supply.name}
-                            </CommandItem>
-                          ))}
-                          <div className="py-2 px-3 text-sm text-gray-500 dark:text-gray-400 text-center border-t border-gray-100 dark:border-gray-800">
-                            Type to search more supplies...
-                          </div>
-                        </>
-                      ) : (
-                        supplies.map((supply) => (
-                          <CommandItem
-                            key={supply.id}
-                            onSelect={() => {
-                              setSelectedSupply(supply.id);
-                              setEditDelivery(prev => ({
-                                ...prev,
-                                supplyId: supply.id,
-                                supplyName: supply.name
-                              }));
-                              setEditOpen(false);
-                            }}
-                          >
-                            {supply.name}
-                          </CommandItem>
-                        ))
-                      )}
-                    </CommandGroup>
-                  </Command>
-                </PopoverContent>
-              </Popover>
+                  </div>
+                </div>
+
+                <div className="pt-6 border-t border-slate-200 dark:border-slate-800">
+                  <Button 
+                    type="submit" 
+                    size="lg" 
+                    className="w-full h-12 text-base font-medium bg-blue-600 hover:bg-blue-700" 
+                    disabled={loading}
+                  >
+                    {loading ? (
+                      <>
+                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        Updating Delivery...
+                      </>
+                    ) : (
+                      <>
+                        <Check className="w-5 h-5 mr-1" />
+                        Update Delivery
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </form>
             </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Quantity</label>
-              <Input
-                type="number"
-                value={editDelivery.quantity}
-                onChange={(e) => setEditDelivery(prev => ({ ...prev, quantity: e.target.value }))}
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Delivered By</label>
-              <Input
-                type="text"
-                value={editDelivery.deliveredBy}
-                onChange={(e) => setEditDelivery(prev => ({ ...prev, deliveredBy: e.target.value }))}
-                placeholder="Enter name of delivery person"
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Notes</label>
-              <Input
-                value={editDelivery.notes}
-                onChange={(e) => setEditDelivery(prev => ({ ...prev, notes: e.target.value }))}
-                placeholder="Additional notes..."
-              />
-            </div>
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "Updating..." : "Update Delivery"}
-            </Button>
-          </form>
+          </div>
         </DialogContent>
       </Dialog>
 
@@ -916,6 +1192,41 @@ export function DeliveryPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Add Classification Dialog */}
+      <Dialog open={newClassificationDialogOpen} onOpenChange={setNewClassificationDialogOpen}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>Add New Classification</DialogTitle>
+            <DialogDescription>
+              Enter a new classification for supplies
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleAddClassification} className="space-y-4">
+            <div className="space-y-2">
+              <Label>Classification Name</Label>
+              <Input
+                value={newClassification}
+                onChange={(e) => setNewClassification(e.target.value)}
+                placeholder="Enter classification name"
+                className="h-10"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setNewClassificationDialogOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit">
+                Add Classification
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 } 

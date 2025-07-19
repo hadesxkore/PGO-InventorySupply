@@ -4,7 +4,10 @@ import {
   createUserWithEmailAndPassword, 
   signOut, 
   onAuthStateChanged,
-  signInWithPopup
+  signInWithPopup,
+  updatePassword,
+  EmailAuthProvider,
+  reauthenticateWithCredential
 } from 'firebase/auth';
 import { auth, googleProvider } from './firebase';
 
@@ -34,6 +37,21 @@ export function AuthProvider({ children }) {
     return signInWithPopup(auth, googleProvider);
   }
 
+  async function updateUserPassword(currentPassword, newPassword) {
+    try {
+      const credential = EmailAuthProvider.credential(
+        auth.currentUser.email,
+        currentPassword
+      );
+      // Re-authenticate user before updating password
+      await reauthenticateWithCredential(auth.currentUser, credential);
+      // Update password
+      await updatePassword(auth.currentUser, newPassword);
+    } catch (error) {
+      throw error;
+    }
+  }
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
@@ -48,7 +66,8 @@ export function AuthProvider({ children }) {
     login,
     signup,
     logout,
-    signInWithGoogle
+    signInWithGoogle,
+    updatePassword: updateUserPassword
   };
 
   return (

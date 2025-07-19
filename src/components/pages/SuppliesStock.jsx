@@ -40,6 +40,13 @@ import {
   SelectValue,
 } from "../ui/select";
 import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+} from "../ui/command";
+import {
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -51,10 +58,11 @@ import {
   deleteSupply,
   searchSupplies,
   db,
-  clusters
+  clusters,
+  addClassification
 } from "../../lib/firebase";
 import { collection, onSnapshot, query, orderBy, where, addDoc } from "firebase/firestore";
-import { Search, Plus, Pencil, Trash2, Package, Boxes, AlertTriangle, XCircle, Calendar, ArrowUpDown } from "lucide-react";
+import { Search, Plus, Pencil, Trash2, Package, Boxes, AlertTriangle, XCircle, Calendar, ArrowUpDown, FileText, Check } from "lucide-react";
 import { format } from "date-fns";
 import { Calendar as CalendarComponent } from "../ui/calendar";
 import { Skeleton } from "../ui/skeleton";
@@ -93,26 +101,47 @@ export function SuppliesStock() {
   const [selectedDate, setSelectedDate] = useState(null);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [classifications, setClassifications] = useState([]);
+  const [newClassification, setNewClassification] = useState("");
+  const [newClassificationDialogOpen, setNewClassificationDialogOpen] = useState(false);
+  const [classificationSearchOpen, setClassificationSearchOpen] = useState(false);
+  const [classificationSearchQuery, setClassificationSearchQuery] = useState("");
+  
   const [newSupply, setNewSupply] = useState({
     name: "",
     quantity: "",
     unit: "",
     image: "",
-    cluster: "", // Add cluster to the state
+    cluster: "",
+    classification: "", // Add classification field
   });
+
   const [editSupply, setEditSupply] = useState({
     id: "",
     name: "",
     quantity: "",
     unit: "",
     image: "",
-    cluster: "", // Add cluster to edit state
+    cluster: "",
+    classification: "", // Add classification field
   });
   const [isLoading, setIsLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 15; // Changed from 20 to 15
   const [sortOrder, setSortOrder] = useState('asc'); // Add sort order state
   const [stockFilter, setStockFilter] = useState('all'); // Add stock filter state
+  const [unitSearchOpen, setUnitSearchOpen] = useState(false);
+  const [unitSearchQuery, setUnitSearchQuery] = useState("");
+  
+  // Filter units based on search query
+  const filteredUnits = units.filter(unit =>
+    unit.name.toLowerCase().includes(unitSearchQuery.toLowerCase())
+  );
+
+  // Filter classifications based on search query
+  const filteredClassifications = classifications.filter(classification =>
+    classification.name.toLowerCase().includes(classificationSearchQuery.toLowerCase())
+  );
 
   // Calculate pagination values
   const totalPages = Math.ceil(filteredSupplies.length / itemsPerPage);
@@ -138,6 +167,24 @@ export function SuppliesStock() {
     }, (error) => {
       console.error("Error fetching units:", error);
       toast.error("Failed to fetch units");
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Fetch classifications from Firebase
+  useEffect(() => {
+    const q = query(collection(db, "classifications"), orderBy("name"));
+    
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const classificationsData = [];
+      snapshot.forEach((doc) => {
+        classificationsData.push({ id: doc.id, ...doc.data() });
+      });
+      setClassifications(classificationsData);
+    }, (error) => {
+      console.error("Error fetching classifications:", error);
+      toast.error("Failed to fetch classifications");
     });
 
     return () => unsubscribe();
@@ -240,6 +287,24 @@ export function SuppliesStock() {
     }
   };
 
+  const handleAddClassification = async (e) => {
+    e.preventDefault();
+    if (!newClassification.trim()) {
+      toast.error("Please enter a classification name");
+      return;
+    }
+
+    try {
+      await addClassification(newClassification);
+      setNewClassification("");
+      setNewClassificationDialogOpen(false);
+      toast.success("Classification added successfully");
+    } catch (error) {
+      console.error("Error adding classification:", error);
+      toast.error("Failed to add classification");
+    }
+  };
+
   const handleAddSupply = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -258,7 +323,7 @@ export function SuppliesStock() {
       });
 
       setDialogOpen(false);
-      setNewSupply({ name: "", quantity: "", unit: "", image: "", cluster: "" });
+      setNewSupply({ name: "", quantity: "", unit: "", image: "", cluster: "", classification: "" });
       setSelectedImage(null);
       toast.success("Supply added successfully");
     } catch (error) {
@@ -276,6 +341,7 @@ export function SuppliesStock() {
       unit: supply.unit,
       image: supply.image,
       cluster: supply.id.split('-')[0], // Extract cluster from ID
+      classification: supply.classification, // Set classification
     });
     setEditDialogOpen(true);
   };
@@ -295,16 +361,23 @@ export function SuppliesStock() {
         imageUrl = await uploadImage(selectedImage);
       }
 
-      await updateSupply(editSupply.id, {
+      const updatedData = {
         ...editSupply,
         image: imageUrl,
         quantity: parseInt(editSupply.quantity),
-        availability: parseInt(editSupply.quantity), // Update availability when quantity is updated
-      });
+        availability: parseInt(editSupply.quantity),
+      };
+
+      const newId = await updateSupply(editSupply.id, updatedData);
 
       setEditDialogOpen(false);
       setSelectedImage(null);
       toast.success("Supply updated successfully");
+
+      // If the ID changed (due to cluster change), update the selected supply
+      if (newId !== editSupply.id) {
+        setSelectedSupply(prev => prev?.id === editSupply.id ? { ...prev, id: newId } : prev);
+      }
     } catch (error) {
       console.error("Error updating supply:", error);
       toast.error("Failed to update supply");
@@ -419,26 +492,29 @@ export function SuppliesStock() {
                   Add Supply
                 </Button>
               </DialogTrigger>
-              <DialogContent className="sm:max-w-[900px] p-0 gap-0">
-                <div className="grid grid-cols-5 min-h-[600px]">
+              <DialogContent className="sm:max-w-[1000px] p-0">
+                <div className="grid grid-cols-5 min-h-[650px]">
                   {/* Left Column - Image Preview/Upload */}
-                  <div className="col-span-2 bg-gray-50 dark:bg-gray-900/50 p-6 flex flex-col gap-4 border-r border-gray-200 dark:border-gray-800">
+                  <div className="col-span-2 bg-slate-50 dark:bg-slate-900/50 p-8 flex flex-col gap-6 border-r border-slate-200 dark:border-slate-800">
                     <div className="flex-1 flex flex-col gap-4">
-                      <div className="text-sm font-medium text-gray-600 dark:text-gray-400">Supply Image</div>
-                      <div className="relative flex-1 flex flex-col items-center justify-center border-2 border-dashed border-gray-200 dark:border-gray-800 rounded-xl bg-white dark:bg-gray-900/30 overflow-hidden group">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Package className="w-5 h-5 text-slate-600 dark:text-slate-400" />
+                        <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-200">Supply Image</h3>
+                      </div>
+                      <div className="relative flex-1 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-xl bg-white dark:bg-slate-900/30 overflow-hidden group">
                         {selectedImage ? (
                           <>
                             <img
                               src={URL.createObjectURL(selectedImage)}
                               alt="Preview"
-                              className="w-full h-full object-cover"
+                              className="w-full h-full object-contain"
                             />
                             <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                               <Button
                                 type="button"
                                 variant="outline"
                                 size="sm"
-                                className="text-white border-white hover:text-white"
+                                className="text-white border-white hover:text-white hover:border-white"
                                 onClick={() => setSelectedImage(null)}
                               >
                                 Change Image
@@ -446,12 +522,12 @@ export function SuppliesStock() {
                             </div>
                           </>
                         ) : (
-                          <label className="flex-1 w-full h-full flex flex-col items-center justify-center cursor-pointer">
-                            <div className="rounded-full bg-gray-100 dark:bg-gray-800 p-4 mb-4">
-                              <Package className="w-8 h-8 text-gray-400" />
+                          <label className="flex-1 w-full h-full flex flex-col items-center justify-center cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-colors">
+                            <div className="rounded-full bg-slate-100 dark:bg-slate-800 p-4 mb-4">
+                              <Package className="w-8 h-8 text-slate-400" />
                             </div>
-                            <div className="text-sm font-medium mb-1">Drop your image here</div>
-                            <div className="text-xs text-gray-500 mb-4">or click to browse</div>
+                            <div className="text-base font-medium text-slate-900 dark:text-slate-200 mb-1">Drop your image here</div>
+                            <div className="text-sm text-slate-500 mb-4">or click to browse</div>
                             <Input
                               type="file"
                               accept="image/*"
@@ -461,32 +537,57 @@ export function SuppliesStock() {
                           </label>
                         )}
                       </div>
-                    </div>
-                    <div className="text-xs text-gray-500 text-center">
-                      Supported formats: JPEG, PNG, GIF
+                      <div className="text-xs text-slate-500 dark:text-slate-400">
+                        <div className="flex items-center gap-1 mb-1">
+                          <AlertTriangle className="w-3 h-3" />
+                          <span className="font-medium">Supported formats:</span>
+                        </div>
+                        <ul className="list-disc ml-4 space-y-0.5">
+                          <li>JPEG, PNG, GIF</li>
+                          <li>Maximum size: 5MB</li>
+                          <li>Recommended size: 800x800px</li>
+                        </ul>
+                      </div>
                     </div>
                   </div>
 
                   {/* Right Column - Form Fields */}
-                  <div className="col-span-3 p-6">
-                    <DialogHeader>
-                      <DialogTitle className="text-xl">Add New Supply</DialogTitle>
-                      <DialogDescription className="text-sm">
-                        Add a new supply item to the inventory
+                  <div className="col-span-3 p-8">
+                    <DialogHeader className="mb-8">
+                      <DialogTitle className="text-2xl font-bold text-slate-900 dark:text-slate-200">Add New Supply</DialogTitle>
+                      <DialogDescription className="text-base text-slate-500 dark:text-slate-400">
+                        Fill in the details below to add a new supply item to the inventory.
                       </DialogDescription>
                     </DialogHeader>
 
-                    <form onSubmit={handleAddSupply} className="mt-6 space-y-6">
-                      <div className="grid grid-cols-2 gap-6">
-                        {/* Supply Details */}
-                        <div className="col-span-2 space-y-2">
-                          <label className="text-sm font-medium">Supply Category</label>
+                    <form onSubmit={handleAddSupply} className="space-y-8">
+                  {/* Supply Category Section */}
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2">
+                      <Boxes className="w-5 h-5 text-slate-600 dark:text-slate-400" />
+                      <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-200">Category & Details</h3>
+                    </div>
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Supply Name</label>
+                        <Input
+                          required
+                          className="h-[38px] bg-white dark:bg-slate-900"
+                          value={newSupply.name}
+                          onChange={(e) => setNewSupply({ ...newSupply, name: e.target.value })}
+                          placeholder="Enter supply name"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Supply Category</label>
                           <Select
                             value={newSupply.cluster}
                             onValueChange={(value) => setNewSupply({ ...newSupply, cluster: value })}
                             required
                           >
-                            <SelectTrigger className="h-11">
+                            <SelectTrigger className="h-[38px] bg-white dark:bg-slate-900">
                               <SelectValue placeholder="Select a category" />
                             </SelectTrigger>
                             <SelectContent>
@@ -494,7 +595,7 @@ export function SuppliesStock() {
                                 <SelectItem key={cluster.code} value={cluster.code}>
                                   <div className="flex items-center gap-2">
                                     <span className="font-medium">{cluster.name}</span>
-                                    <span className="text-xs text-gray-500">({cluster.code})</span>
+                                    <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">{cluster.code}</span>
                                   </div>
                                 </SelectItem>
                               ))}
@@ -502,73 +603,153 @@ export function SuppliesStock() {
                           </Select>
                         </div>
 
-                        <div className="col-span-2 space-y-2">
-                          <label className="text-sm font-medium">Name</label>
-                          <Input
-                            required
-                            className="h-11 text-sm"
-                            value={newSupply.name}
-                            onChange={(e) => setNewSupply({ ...newSupply, name: e.target.value })}
-                            placeholder="Enter supply name"
-                          />
-                        </div>
-
                         <div className="space-y-2">
-                          <label className="text-sm font-medium">Quantity</label>
+                          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Initial Quantity</label>
                           <Input
                             required
                             type="number"
                             min="0"
-                            className="h-11 text-sm"
+                            className="h-[38px] bg-white dark:bg-slate-900"
                             value={newSupply.quantity}
                             onChange={(e) => setNewSupply({ ...newSupply, quantity: e.target.value })}
                             placeholder="Enter quantity"
                           />
                         </div>
-
-                        <div className="space-y-2">
-                          <label className="text-sm font-medium">Unit</label>
-                          <Select
-                            value={newSupply.unit}
-                            onValueChange={(value) => setNewSupply({ ...newSupply, unit: value })}
-                            required
-                          >
-                            <SelectTrigger className="h-11">
-                              <SelectValue placeholder="Select a unit" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {units.map((unit) => (
-                                <SelectItem key={unit.id} value={unit.name}>
-                                  {unit.name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
                       </div>
+                    </div>
+                  </div>
 
-                      <div className="flex items-center gap-2 pt-2">
+                  {/* Unit & Classification Section */}
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2">
+                      <Package className="w-5 h-5 text-slate-600 dark:text-slate-400" />
+                      <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-200">Unit & Classification</h3>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Unit of Measurement</label>
+                        <Popover open={unitSearchOpen} onOpenChange={setUnitSearchOpen}>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="outline"
+                              role="combobox"
+                              aria-expanded={unitSearchOpen}
+                              className="h-[38px] w-full justify-between bg-white dark:bg-slate-900"
+                            >
+                              {newSupply.unit || "Select a unit..."}
+                              <span className="ml-2 opacity-50">⌄</span>
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-full p-0" align="start">
+                            <Command>
+                              <CommandInput
+                                placeholder="Search unit..."
+                                value={unitSearchQuery}
+                                onValueChange={setUnitSearchQuery}
+                                className="h-9"
+                              />
+                              <CommandEmpty>No unit found.</CommandEmpty>
+                              <CommandGroup className="max-h-[200px] overflow-auto">
+                                {filteredUnits.map((unit) => (
+                                  <CommandItem
+                                    key={unit.id}
+                                    value={unit.name}
+                                    onSelect={(value) => {
+                                      setNewSupply({ ...newSupply, unit: value });
+                                      setUnitSearchOpen(false);
+                                    }}
+                                  >
+                                    {unit.name}
+                                  </CommandItem>
+                                ))}
+                              </CommandGroup>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
                         <Button
                           type="button"
                           variant="outline"
                           size="sm"
                           onClick={() => setNewUnitDialogOpen(true)}
+                          className="w-full mt-2 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
                         >
                           <Plus className="w-4 h-4 mr-1" />
                           Add New Unit
                         </Button>
                       </div>
 
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Classification</label>
+                        <Popover open={classificationSearchOpen} onOpenChange={setClassificationSearchOpen}>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="outline"
+                              role="combobox"
+                              aria-expanded={classificationSearchOpen}
+                              className="h-[38px] w-full justify-between bg-white dark:bg-slate-900"
+                            >
+                              {newSupply.classification || "Select a classification..."}
+                              <span className="ml-2 opacity-50">⌄</span>
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-full p-0" align="start">
+                            <Command>
+                              <CommandInput
+                                placeholder="Search classification..."
+                                value={classificationSearchQuery}
+                                onValueChange={setClassificationSearchQuery}
+                                className="h-9"
+                              />
+                              <CommandEmpty>No classification found.</CommandEmpty>
+                              <CommandGroup className="max-h-[200px] overflow-auto">
+                                {filteredClassifications.map((classification) => (
+                                  <CommandItem
+                                    key={classification.id}
+                                    value={classification.name}
+                                    onSelect={(value) => {
+                                      setNewSupply({ ...newSupply, classification: value });
+                                      setClassificationSearchOpen(false);
+                                    }}
+                                  >
+                                    {classification.name}
+                                  </CommandItem>
+                                ))}
+                              </CommandGroup>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setNewClassificationDialogOpen(true)}
+                          className="w-full mt-2 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
+                        >
+                          <Plus className="w-4 h-4 mr-1" />
+                          Add New Classification
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+
                       {/* Submit Button */}
-                      <div className="pt-4">
-                        <Button type="submit" size="lg" className="w-full h-11 text-sm" disabled={loading}>
+                      <div className="pt-6 border-t border-slate-200 dark:border-slate-800">
+                        <Button 
+                          type="submit" 
+                          size="lg" 
+                          className="w-full h-12 text-base font-medium bg-blue-600 hover:bg-blue-700" 
+                          disabled={loading}
+                        >
                           {loading ? (
                             <div className="flex items-center gap-2">
-                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                              <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                               Adding Supply...
                             </div>
                           ) : (
-                            "Add Supply"
+                            <>
+                              <Plus className="w-5 h-5 mr-1" />
+                              Add Supply
+                            </>
                           )}
                         </Button>
                       </div>
@@ -585,25 +766,58 @@ export function SuppliesStock() {
                   Import Data
                 </Button>
               </DialogTrigger>
-              <DialogContent>
+              <DialogContent className="sm:max-w-[600px]">
                 <DialogHeader>
-                  <DialogTitle>Import Excel Data</DialogTitle>
+                  <DialogTitle className="text-xl">Import Excel Data</DialogTitle>
                   <DialogDescription>
-                    Select an Excel file to import. Only the "Item" column will be imported as supply names.
+                    Upload your Excel file to import supply items into the inventory.
                   </DialogDescription>
                 </DialogHeader>
-                <div className="space-y-4">
-                  <div className="grid w-full max-w-sm items-center gap-1.5">
-                    <Input
-                      type="file"
-                      accept=".xlsx,.xls"
-                      onChange={handleImportExcel}
-                      className="cursor-pointer"
-                    />
+                <div className="space-y-6 py-4">
+                  {/* File Upload Zone */}
+                  <div className="border-2 border-dashed border-gray-200 dark:border-gray-800 rounded-xl p-8 transition-colors hover:border-gray-300 dark:hover:border-gray-700">
+                    <div className="flex flex-col items-center justify-center gap-4">
+                      <div className="rounded-full bg-blue-50 dark:bg-blue-900/20 p-4">
+                        <FileText className="w-8 h-8 text-blue-600 dark:text-blue-400" />
+                      </div>
+                      <div className="text-center">
+                        <h3 className="text-lg font-semibold mb-1">Drop your Excel file here</h3>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+                          or click to browse from your computer
+                        </p>
+                        <Input
+                          type="file"
+                          accept=".xlsx,.xls"
+                          onChange={handleImportExcel}
+                          className="cursor-pointer max-w-[300px]"
+                        />
+                      </div>
+                    </div>
                   </div>
-                  <div className="text-sm text-gray-500 dark:text-gray-400">
-                    Note: Only Excel files (.xlsx, .xls) are supported. The system will only import the "Item" column.
-                  </div>
+
+                  {/* Information Card */}
+                  <Card className="bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800">
+                    <div className="p-4 flex gap-3">
+                      <div className="shrink-0">
+                        <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+                      </div>
+                      <div className="space-y-1">
+                        <h4 className="font-medium text-amber-900 dark:text-amber-400">Important Note</h4>
+                        <ul className="text-sm text-amber-800 dark:text-amber-300 space-y-1 list-disc ml-4">
+                          <li>Only Excel files (.xlsx, .xls) are supported</li>
+                          <li>The system will only import the "Item" column</li>
+                          <li>Duplicate items will be skipped automatically</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </Card>
+
+                  {loading && (
+                    <div className="flex items-center justify-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                      <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></div>
+                      Processing your file...
+                    </div>
+                  )}
                 </div>
               </DialogContent>
             </Dialog>
@@ -639,6 +853,41 @@ export function SuppliesStock() {
                 </Button>
                 <Button type="submit">
                   Add Unit
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+
+        {/* Add Classification Dialog */}
+        <Dialog open={newClassificationDialogOpen} onOpenChange={setNewClassificationDialogOpen}>
+          <DialogContent className="sm:max-w-[400px]">
+            <DialogHeader>
+              <DialogTitle>Add New Classification</DialogTitle>
+              <DialogDescription>
+                Enter a new classification for supplies
+              </DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handleAddClassification} className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Classification Name</label>
+                <Input
+                  value={newClassification}
+                  onChange={(e) => setNewClassification(e.target.value)}
+                  placeholder="Enter classification name"
+                  className="h-10"
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setNewClassificationDialogOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit">
+                  Add Classification
                 </Button>
               </div>
             </form>
@@ -820,107 +1069,146 @@ export function SuppliesStock() {
 
         {/* Table section */}
         <div className="p-4">
-          <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>ID</TableHead>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Quantity</TableHead>
-                  <TableHead>Unit</TableHead>
-                  <TableHead>Cluster</TableHead>
-                  <TableHead>Date Added</TableHead>
-                  <TableHead>Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {isLoading ? (
-                  // Loading skeletons
-                  Array(5).fill(null).map((_, index) => (
-                    <TableRow key={`loading-${index}`}>
-                      <TableCell>
-                        <Skeleton className="h-6 w-16" />
-                      </TableCell>
-                      <TableCell>
-                        <Skeleton className="h-6 w-32" />
-                      </TableCell>
-                      <TableCell>
-                        <Skeleton className="h-6 w-16" />
-                      </TableCell>
-                      <TableCell>
-                        <Skeleton className="h-6 w-20" />
-                      </TableCell>
-                      <TableCell>
-                        <Skeleton className="h-6 w-24" />
-                      </TableCell>
-                      <TableCell>
-                        <Skeleton className="h-6 w-32" />
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex gap-2">
-                          <Skeleton className="h-9 w-9" />
-                          <Skeleton className="h-9 w-9" />
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                ) : currentSupplies.length === 0 ? (
+          <div className="rounded-lg border border-gray-200 dark:border-gray-700">
+            <div className="max-h-[600px] overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600 scrollbar-track-gray-100 dark:scrollbar-track-gray-800 scrollbar-thumb-rounded-full scrollbar-track-rounded-full">
+              <Table>
+                <TableHeader className="sticky top-0 bg-white dark:bg-gray-800 shadow-sm z-10">
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-8 text-gray-500 dark:text-gray-400">
-                      No supplies found
-                    </TableCell>
+                    <TableHead className="w-[120px]">ID</TableHead>
+                    <TableHead className="w-[100px]">Image</TableHead>
+                    <TableHead className="min-w-[200px]">Name</TableHead>
+                    <TableHead className="w-[150px]">Classification</TableHead>
+                    <TableHead className="w-[100px]">Quantity</TableHead>
+                    <TableHead className="w-[100px]">Unit</TableHead>
+                    <TableHead className="w-[100px]">Cluster</TableHead>
+                    <TableHead className="min-w-[180px]">Date Added</TableHead>
+                    <TableHead className="w-[180px] text-right pr-4">Actions</TableHead>
                   </TableRow>
-                ) : (
-                  currentSupplies.map((supply) => (
-                    <TableRow key={supply.id}>
-                      <TableCell className="font-mono">{supply.id}</TableCell>
-                      <TableCell>
-                        <span className="px-2.5 py-1 rounded-md bg-blue-50 dark:bg-blue-900/20 font-medium">
-                          {supply.name}
-                        </span>
-                      </TableCell>
-                      <TableCell>
-                        <span className="px-2.5 py-1 rounded-md bg-green-50 dark:bg-green-900/20 font-medium">
-                          {supply.quantity}
-                        </span>
-                      </TableCell>
-                      <TableCell>{supply.unit}</TableCell>
-                      <TableCell>{supply.cluster}</TableCell>
-                      <TableCell>
-                        {formatDate(supply.dateAdded)}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex gap-2">
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => handleEditClick(supply)}
-                            className="bg-blue-600 hover:bg-blue-700 text-white gap-2"
-                          >
-                            <Pencil className="w-4 h-4" />
-                            Edit
-                          </Button>
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => handleDeleteClick(supply)}
-                            className="bg-red-600 hover:bg-red-700 text-white gap-2"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                            Delete
-                          </Button>
-                        </div>
+                </TableHeader>
+                <TableBody>
+                  {isLoading ? (
+                    // Loading skeletons
+                    Array(5).fill(null).map((_, index) => (
+                      <TableRow key={`loading-${index}`}>
+                        <TableCell>
+                          <Skeleton className="h-6 w-16" />
+                        </TableCell>
+                        <TableCell>
+                          <Skeleton className="h-10 w-10 rounded-full" />
+                        </TableCell>
+                        <TableCell>
+                          <Skeleton className="h-6 w-32" />
+                        </TableCell>
+                        <TableCell>
+                          <Skeleton className="h-6 w-32" />
+                        </TableCell>
+                        <TableCell>
+                          <Skeleton className="h-6 w-16" />
+                        </TableCell>
+                        <TableCell>
+                          <Skeleton className="h-6 w-20" />
+                        </TableCell>
+                        <TableCell>
+                          <Skeleton className="h-6 w-24" />
+                        </TableCell>
+                        <TableCell>
+                          <Skeleton className="h-6 w-32" />
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex gap-2 justify-end">
+                            <Skeleton className="h-9 w-9" />
+                            <Skeleton className="h-9 w-9" />
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  ) : currentSupplies.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={9} className="text-center py-8 text-gray-500 dark:text-gray-400">
+                        No supplies found
                       </TableCell>
                     </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
+                  ) : (
+                    currentSupplies.map((supply) => (
+                      <TableRow key={supply.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                        <TableCell className="font-mono">{supply.id}</TableCell>
+                        <TableCell>
+                          {supply.image ? (
+                            <img
+                              src={supply.image}
+                              alt={supply.name}
+                              className="w-10 h-10 rounded-full object-cover"
+                            />
+                          ) : (
+                            <div className="w-10 h-10 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
+                              <Package className="w-5 h-5 text-gray-400" />
+                            </div>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <span className="px-2.5 py-1 rounded-md bg-blue-50 dark:bg-blue-900/20 font-medium">
+                            {supply.name}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <span className="px-2.5 py-1 rounded-md bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 font-medium">
+                            {supply.classification || "N/A"}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <span className={cn(
+                            "px-2.5 py-1 rounded-md font-medium",
+                            supply.quantity === 0 
+                              ? "bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400" 
+                              : supply.quantity < 10
+                              ? "bg-yellow-50 dark:bg-yellow-900/20 text-yellow-600 dark:text-yellow-400"
+                              : "bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400"
+                          )}>
+                            {supply.quantity}
+                          </span>
+                        </TableCell>
+                        <TableCell>{supply.unit}</TableCell>
+                        <TableCell>
+                          <span className="px-2.5 py-1 rounded-md bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400 font-medium">
+                            {supply.cluster}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          {formatDate(supply.dateAdded)}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex gap-2 justify-end">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => handleEditClick(supply)}
+                              className="bg-blue-600 hover:bg-blue-700 text-white gap-2"
+                            >
+                              <Pencil className="w-4 h-4" />
+                              Edit
+                            </Button>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => handleDeleteClick(supply)}
+                              className="bg-red-600 hover:bg-red-700 text-white gap-2"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                              Delete
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
           </div>
 
           {/* Pagination */}
           {!isLoading && filteredSupplies.length > 0 && (
-            <div className="mt-6 flex justify-between items-center px-4">
+            <div className="mt-6 flex justify-between items-center">
               <div className="text-sm text-gray-500 dark:text-gray-400">
                 Showing {startIndex + 1} to {Math.min(endIndex, filteredSupplies.length)} of {filteredSupplies.length} supplies
               </div>
@@ -979,65 +1267,45 @@ export function SuppliesStock() {
 
       {/* Edit Supply Dialog */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent className="sm:max-w-[900px] p-0 gap-0">
-          <div className="grid grid-cols-5 min-h-[600px]">
+        <DialogContent className="sm:max-w-[1000px] p-0">
+          <div className="grid grid-cols-5 min-h-[650px]">
             {/* Left Column - Image Preview/Upload */}
-            <div className="col-span-2 bg-gray-50 dark:bg-gray-900/50 p-6 flex flex-col gap-4 border-r border-gray-200 dark:border-gray-800">
+            <div className="col-span-2 bg-slate-50 dark:bg-slate-900/50 p-8 flex flex-col gap-6 border-r border-slate-200 dark:border-slate-800">
               <div className="flex-1 flex flex-col gap-4">
-                <div className="text-sm font-medium text-gray-600 dark:text-gray-400">Supply Image</div>
-                <div className="relative flex-1 flex flex-col items-center justify-center border-2 border-dashed border-gray-200 dark:border-gray-800 rounded-xl bg-white dark:bg-gray-900/30 overflow-hidden group">
-                  {selectedImage ? (
+                <div className="flex items-center gap-2 mb-2">
+                  <Package className="w-5 h-5 text-slate-600 dark:text-slate-400" />
+                  <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-200">Supply Image</h3>
+                </div>
+                <div className="relative flex-1 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-xl bg-white dark:bg-slate-900/30 overflow-hidden group">
+                  {selectedImage || editSupply.image ? (
                     <>
                       <img
-                        src={URL.createObjectURL(selectedImage)}
-                        alt="New"
-                        className="w-full h-full object-cover"
+                        src={selectedImage ? URL.createObjectURL(selectedImage) : editSupply.image}
+                        alt="Preview"
+                        className="w-full h-full object-contain"
                       />
                       <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                         <Button
                           type="button"
                           variant="outline"
                           size="sm"
-                          className="text-white border-white hover:text-white"
-                          onClick={() => setSelectedImage(null)}
+                          className="text-white border-white hover:text-white hover:border-white"
+                          onClick={() => {
+                            setSelectedImage(null);
+                            setEditSupply({ ...editSupply, image: "" });
+                          }}
                         >
                           Change Image
                         </Button>
                       </div>
                     </>
-                  ) : editSupply.image ? (
-                    <>
-                      <img
-                        src={editSupply.image}
-                        alt="Current"
-                        className="w-full h-full object-cover"
-                      />
-                      <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                        <label className="cursor-pointer">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="text-white border-white hover:text-white"
-                          >
-                            Change Image
-                          </Button>
-                          <Input
-                            type="file"
-                            accept="image/*"
-                            className="hidden"
-                            onChange={handleImageChange}
-                          />
-                        </label>
-                      </div>
-                    </>
                   ) : (
-                    <label className="flex-1 w-full h-full flex flex-col items-center justify-center cursor-pointer">
-                      <div className="rounded-full bg-gray-100 dark:bg-gray-800 p-4 mb-4">
-                        <Package className="w-8 h-8 text-gray-400" />
+                    <label className="flex-1 w-full h-full flex flex-col items-center justify-center cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-colors">
+                      <div className="rounded-full bg-slate-100 dark:bg-slate-800 p-4 mb-4">
+                        <Package className="w-8 h-8 text-slate-400" />
                       </div>
-                      <div className="text-sm font-medium mb-1">Drop your image here</div>
-                      <div className="text-xs text-gray-500 mb-4">or click to browse</div>
+                      <div className="text-base font-medium text-slate-900 dark:text-slate-200 mb-1">Drop your image here</div>
+                      <div className="text-sm text-slate-500 mb-4">or click to browse</div>
                       <Input
                         type="file"
                         accept="image/*"
@@ -1047,114 +1315,219 @@ export function SuppliesStock() {
                     </label>
                   )}
                 </div>
-              </div>
-              <div className="text-xs text-gray-500 text-center">
-                Supported formats: JPEG, PNG, GIF
+                <div className="text-xs text-slate-500 dark:text-slate-400">
+                  <div className="flex items-center gap-1 mb-1">
+                    <AlertTriangle className="w-3 h-3" />
+                    <span className="font-medium">Supported formats:</span>
+                  </div>
+                  <ul className="list-disc ml-4 space-y-0.5">
+                    <li>JPEG, PNG, GIF</li>
+                    <li>Maximum size: 5MB</li>
+                    <li>Recommended size: 800x800px</li>
+                  </ul>
+                </div>
               </div>
             </div>
 
             {/* Right Column - Form Fields */}
-            <div className="col-span-3 p-6">
-              <DialogHeader>
-                <DialogTitle className="text-xl">Edit Supply</DialogTitle>
-                <DialogDescription className="text-sm">
-                  Update the supply information
+            <div className="col-span-3 p-8">
+              <DialogHeader className="mb-8">
+                <DialogTitle className="text-2xl font-bold text-slate-900 dark:text-slate-200">Edit Supply</DialogTitle>
+                <DialogDescription className="text-base text-slate-500 dark:text-slate-400">
+                  Update the supply details below
                 </DialogDescription>
               </DialogHeader>
 
-              <form onSubmit={handleEditSupply} className="mt-6 space-y-6">
-                <div className="grid grid-cols-2 gap-6">
-                  {/* Supply Details */}
-                  <div className="col-span-2 space-y-2">
-                    <label className="text-sm font-medium">Supply Category</label>
-                    <Select
-                      value={editSupply.cluster}
-                      onValueChange={(value) => setEditSupply({ ...editSupply, cluster: value })}
-                      required
-                    >
-                      <SelectTrigger className="h-11">
-                        <SelectValue placeholder="Select a category" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {clusters.map((cluster) => (
-                          <SelectItem key={cluster.code} value={cluster.code}>
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium">{cluster.name}</span>
-                              <span className="text-xs text-gray-500">({cluster.code})</span>
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+              <form onSubmit={handleEditSupply} className="space-y-8">
+                {/* Category & Details Section */}
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <Boxes className="w-5 h-5 text-slate-600 dark:text-slate-400" />
+                    <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-200">Category & Details</h3>
                   </div>
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Supply Name</label>
+                      <Input
+                        required
+                        className="h-[38px] bg-white dark:bg-slate-900"
+                        value={editSupply.name}
+                        onChange={(e) => setEditSupply({ ...editSupply, name: e.target.value })}
+                        placeholder="Enter supply name"
+                      />
+                    </div>
 
-                  <div className="col-span-2 space-y-2">
-                    <label className="text-sm font-medium">Name</label>
-                    <Input
-                      required
-                      className="h-11 text-sm"
-                      value={editSupply.name}
-                      onChange={(e) => setEditSupply({ ...editSupply, name: e.target.value })}
-                      placeholder="Enter supply name"
-                    />
-                  </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Supply Category</label>
+                        <Select
+                          value={editSupply.cluster}
+                          onValueChange={(value) => setEditSupply({ ...editSupply, cluster: value })}
+                          required
+                        >
+                          <SelectTrigger className="h-[38px] bg-white dark:bg-slate-900">
+                            <SelectValue placeholder="Select a category" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {clusters.map((cluster) => (
+                              <SelectItem key={cluster.code} value={cluster.code}>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-medium">{cluster.name}</span>
+                                  <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">{cluster.code}</span>
+                                </div>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
 
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Quantity</label>
-                    <Input
-                      required
-                      type="number"
-                      min="0"
-                      className="h-11 text-sm"
-                      value={editSupply.quantity}
-                      onChange={(e) => setEditSupply({ ...editSupply, quantity: e.target.value })}
-                      placeholder="Enter quantity"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Unit</label>
-                    <Select
-                      value={editSupply.unit}
-                      onValueChange={(value) => setEditSupply({ ...editSupply, unit: value })}
-                      required
-                    >
-                      <SelectTrigger className="h-11">
-                        <SelectValue placeholder="Select a unit" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {units.map((unit) => (
-                          <SelectItem key={unit.id} value={unit.name}>
-                            {unit.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Initial Quantity</label>
+                        <Input
+                          required
+                          type="number"
+                          min="0"
+                          className="h-[38px] bg-white dark:bg-slate-900"
+                          value={editSupply.quantity}
+                          onChange={(e) => setEditSupply({ ...editSupply, quantity: e.target.value })}
+                          placeholder="Enter quantity"
+                        />
+                      </div>
+                    </div>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 pt-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setNewUnitDialogOpen(true)}
-                  >
-                    <Plus className="w-4 h-4 mr-1" />
-                    Add New Unit
-                  </Button>
+                {/* Unit & Classification Section */}
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <Package className="w-5 h-5 text-slate-600 dark:text-slate-400" />
+                    <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-200">Unit & Classification</h3>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Unit of Measurement</label>
+                      <Popover open={unitSearchOpen} onOpenChange={setUnitSearchOpen}>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="outline"
+                            role="combobox"
+                            aria-expanded={unitSearchOpen}
+                            className="h-[38px] w-full justify-between bg-white dark:bg-slate-900"
+                          >
+                            {editSupply.unit || "Select a unit..."}
+                            <span className="ml-2 opacity-50">⌄</span>
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-full p-0" align="start">
+                          <Command>
+                            <CommandInput
+                              placeholder="Search unit..."
+                              value={unitSearchQuery}
+                              onValueChange={setUnitSearchQuery}
+                              className="h-9"
+                            />
+                            <CommandEmpty>No unit found.</CommandEmpty>
+                            <CommandGroup className="max-h-[200px] overflow-auto">
+                              {filteredUnits.map((unit) => (
+                                <CommandItem
+                                  key={unit.id}
+                                  value={unit.name}
+                                  onSelect={(value) => {
+                                    setEditSupply({ ...editSupply, unit: value });
+                                    setUnitSearchOpen(false);
+                                  }}
+                                >
+                                  {unit.name}
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setNewUnitDialogOpen(true)}
+                        className="w-full mt-2 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
+                      >
+                        <Plus className="w-4 h-4 mr-1" />
+                        Add New Unit
+                      </Button>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Classification</label>
+                      <Popover open={classificationSearchOpen} onOpenChange={setClassificationSearchOpen}>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="outline"
+                            role="combobox"
+                            aria-expanded={classificationSearchOpen}
+                            className="h-[38px] w-full justify-between bg-white dark:bg-slate-900"
+                          >
+                            {editSupply.classification || "Select a classification..."}
+                            <span className="ml-2 opacity-50">⌄</span>
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-full p-0" align="start">
+                          <Command>
+                            <CommandInput
+                              placeholder="Search classification..."
+                              value={classificationSearchQuery}
+                              onValueChange={setClassificationSearchQuery}
+                              className="h-9"
+                            />
+                            <CommandEmpty>No classification found.</CommandEmpty>
+                            <CommandGroup className="max-h-[200px] overflow-auto">
+                              {filteredClassifications.map((classification) => (
+                                <CommandItem
+                                  key={classification.id}
+                                  value={classification.name}
+                                  onSelect={(value) => {
+                                    setEditSupply({ ...editSupply, classification: value });
+                                    setClassificationSearchOpen(false);
+                                  }}
+                                >
+                                  {classification.name}
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setNewClassificationDialogOpen(true)}
+                        className="w-full mt-2 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
+                      >
+                        <Plus className="w-4 h-4 mr-1" />
+                        Add New Classification
+                      </Button>
+                    </div>
+                  </div>
                 </div>
 
                 {/* Submit Button */}
-                <div className="pt-4">
-                  <Button type="submit" size="lg" className="w-full h-11 text-sm" disabled={loading}>
+                <div className="pt-6 border-t border-slate-200 dark:border-slate-800">
+                  <Button 
+                    type="submit" 
+                    size="lg" 
+                    className="w-full h-12 text-base font-medium bg-blue-600 hover:bg-blue-700" 
+                    disabled={loading}
+                  >
                     {loading ? (
                       <div className="flex items-center gap-2">
-                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                         Updating Supply...
                       </div>
                     ) : (
-                      "Update Supply"
+                      <>
+                        <Check className="w-5 h-5 mr-1" />
+                        Update Supply
+                      </>
                     )}
                   </Button>
                 </div>

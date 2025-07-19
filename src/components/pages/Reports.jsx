@@ -4,6 +4,7 @@ import { Card } from "../ui/card";
 import { Button } from "../ui/button";
 import { cn } from "../../lib/utils";
 import { toast } from "sonner";
+import { Input } from "../ui/input";
 import {
   Select,
   SelectContent,
@@ -11,6 +12,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../ui/dropdown-menu";
 import {
   Table,
   TableBody,
@@ -20,14 +27,14 @@ import {
   TableRow,
 } from "../ui/table";
 import { DatePickerWithRange } from "../ui/date-range-picker";
-import { addDays, format } from "date-fns";
+import { addDays, format, isWithinInterval, parseISO } from "date-fns";
 import { collection, query, orderBy, getDocs, where, Timestamp } from "firebase/firestore";
-import { db } from "../../lib/firebase";
-import { FileText, FileIcon, Download, Calendar, ArrowUpDown } from "lucide-react";
+import { db, clusters } from "../../lib/firebase";
+import { FileText, FileIcon, Download, Calendar, ArrowUpDown, Filter, Search, Package, ArrowUpRight } from "lucide-react";
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import React from "react"; // Added missing import for React
+import React from "react";
 
 export function Reports() {
   const [reportType, setReportType] = useState("supplies");
@@ -39,24 +46,30 @@ export function Reports() {
   const [loading, setLoading] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [sortOrder, setSortOrder] = useState('asc');
+  const [selectedCluster, setSelectedCluster] = useState('all');
+  const [searchTerm, setSearchTerm] = useState('');
   const itemsPerPage = 20;
 
-  // Calculate pagination values
-  const totalPages = Math.ceil(reportData.length / itemsPerPage);
-  const startIndex = (currentPage - 1) * itemsPerPage;
-  const endIndex = startIndex + itemsPerPage;
+  // Filter and sort data
+  const getFilteredData = () => {
+    return reportData.filter(item => {
+      const matchesSearch = searchTerm === '' || 
+        (item.Name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+         item['Supply Name']?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+         item.ID?.toLowerCase().includes(searchTerm.toLowerCase()));
 
-  // Reset to first page when report type or date changes
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [reportType, dateRange]);
+      const matchesCluster = selectedCluster === 'all' || item.Cluster === selectedCluster;
 
-  // Sort and paginate data
+      return matchesSearch && matchesCluster;
+    });
+  };
+
+  // Get sorted and paginated data
   const getSortedAndPaginatedData = () => {
-    let sortedData = [...reportData];
+    const filteredData = getFilteredData();
     
     // Sort based on name/supplyName depending on report type
-    sortedData.sort((a, b) => {
+    const sortedData = [...filteredData].sort((a, b) => {
       let valueA = '';
       let valueB = '';
       
@@ -73,8 +86,25 @@ export function Reports() {
         : valueB.localeCompare(valueA);
     });
 
-    return sortedData.slice(startIndex, endIndex);
+    // Calculate pagination for filtered data
+    const totalFilteredItems = sortedData.length;
+    const totalFilteredPages = Math.ceil(totalFilteredItems / itemsPerPage);
+    const adjustedCurrentPage = Math.min(currentPage, totalFilteredPages);
+    const startIndex = (adjustedCurrentPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+
+    return {
+      data: sortedData.slice(startIndex, endIndex),
+      totalItems: totalFilteredItems,
+      totalPages: totalFilteredPages,
+      currentPage: adjustedCurrentPage
+    };
   };
+
+  // Reset pagination when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [reportType, dateRange, searchTerm, selectedCluster, sortOrder]);
 
   const toggleSort = () => {
     setSortOrder(current => current === 'asc' ? 'desc' : 'asc');
@@ -117,6 +147,7 @@ export function Reports() {
           data = snapshot.docs.map(doc => ({
             ID: doc.id,
             Name: doc.data().name || '-',
+            Classification: doc.data().classification || 'N/A',
             Quantity: doc.data().quantity || 0,
             Unit: doc.data().unit || 'pcs',
             Cluster: doc.data().cluster || '-',
@@ -126,6 +157,7 @@ export function Reports() {
           data = snapshot.docs.map(doc => ({
             ID: doc.id,
             "Supply Name": doc.data().supplyName || '-',
+            Classification: doc.data().classification || 'N/A',
             Quantity: doc.data().quantity || 0,
             "Delivered By": doc.data().deliveredBy || '-',
             Notes: doc.data().notes || '-',
@@ -135,6 +167,7 @@ export function Reports() {
           data = snapshot.docs.map(doc => ({
             ID: doc.id,
             "Supply Name": doc.data().supplyName || '-',
+            Classification: doc.data().classification || 'N/A',
             Quantity: doc.data().quantity || 0,
             "Received By": doc.data().receivedBy || '-',
             Department: doc.data().department || '-',
@@ -226,7 +259,7 @@ export function Reports() {
       const data = filteredData.map(item => Object.values(item));
       
       // Calculate table width (total of column widths)
-      const tableWidth = 160; // Slightly reduced width
+      const tableWidth = 180; // Increased width to accommodate new column
       const tableX = (pageWidth - tableWidth) / 2; // Center the table
 
       // Add table with footer space consideration - adjusted start position
@@ -250,11 +283,12 @@ export function Reports() {
           cellPadding: 3,
         },
         columnStyles: {
-          0: { cellWidth: 28 }, // ID
-          1: { cellWidth: 45 }, // Name/Supply Name
-          2: { cellWidth: 29 }, // Quantity
-          3: { cellWidth: 29 }, // Unit
-          4: { cellWidth: 29 }, // Cluster
+          0: { cellWidth: 25 }, // ID
+          1: { cellWidth: 40 }, // Name/Supply Name
+          2: { cellWidth: 35 }, // Classification
+          3: { cellWidth: 25 }, // Quantity
+          4: { cellWidth: 25 }, // Unit/Other fields
+          5: { cellWidth: 30 }, // Cluster/Other fields
         },
         alternateRowStyles: {
           fillColor: [245, 247, 250]
@@ -315,25 +349,46 @@ export function Reports() {
         className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8"
       >
         {/* Report Type Selection */}
-        <Card className="p-4">
-          <label className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-2 block">
+        <Card className="p-6 bg-gradient-to-br from-slate-50 to-blue-50/30 dark:from-slate-900/80 dark:to-blue-900/30 border border-slate-200/60 dark:border-slate-700/60 relative overflow-hidden">
+          <div className="absolute top-0 right-0 p-3">
+            <FileText className="w-12 h-12 text-slate-200 dark:text-slate-700 opacity-40 transform rotate-12" />
+          </div>
+          <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 block">
             Report Type
           </label>
           <Select value={reportType} onValueChange={setReportType}>
-            <SelectTrigger>
+            <SelectTrigger className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm border-slate-200 dark:border-slate-700">
               <SelectValue placeholder="Select report type" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="supplies">Supplies Report</SelectItem>
-              <SelectItem value="deliveries">Deliveries Report</SelectItem>
-              <SelectItem value="releases">Releases Report</SelectItem>
+              <SelectItem value="supplies">
+                <div className="flex items-center gap-2">
+                  <Package className="w-4 h-4" />
+                  <span>Supplies Report</span>
+                </div>
+              </SelectItem>
+              <SelectItem value="deliveries">
+                <div className="flex items-center gap-2">
+                  <Download className="w-4 h-4" />
+                  <span>Deliveries Report</span>
+                </div>
+              </SelectItem>
+              <SelectItem value="releases">
+                <div className="flex items-center gap-2">
+                  <ArrowUpRight className="w-4 h-4" />
+                  <span>Releases Report</span>
+                </div>
+              </SelectItem>
             </SelectContent>
           </Select>
         </Card>
 
         {/* Date Range Selection */}
-        <Card className="p-4 col-span-2">
-          <label className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-2 block">
+        <Card className="p-6 col-span-2 bg-gradient-to-br from-slate-50 to-slate-100/50 dark:from-slate-900/80 dark:to-slate-800/30 border border-slate-200/60 dark:border-slate-700/60 relative overflow-hidden">
+          <div className="absolute top-0 right-0 p-3">
+            <Calendar className="w-12 h-12 text-slate-200 dark:text-slate-700 opacity-40 transform rotate-12" />
+          </div>
+          <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 block">
             Date Range
           </label>
           <DatePickerWithRange date={dateRange} setDate={setDateRange} />
@@ -372,11 +427,56 @@ export function Reports() {
         className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700"
       >
         <div className="p-6 border-b border-gray-200 dark:border-gray-700">
-          <div className="flex justify-between items-center">
-            <h2 className="text-lg font-semibold text-gray-800 dark:text-white">
+          <div className="flex justify-between items-center gap-4">
+            <div className="relative flex-1 max-w-md">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+              <Input
+                placeholder="Search by name or ID..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10 pr-4"
+              />
+            </div>
+            <h2 className="text-lg font-semibold text-gray-800 dark:text-white flex-1 text-center">
               Report Preview
             </h2>
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-4 flex-1 justify-end">
+              {reportType === 'supplies' && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className={cn(
+                        "h-10 w-10",
+                        selectedCluster !== 'all' && "bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800"
+                      )}
+                    >
+                      <Filter className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-[200px]">
+                    <DropdownMenuItem 
+                      onClick={() => setSelectedCluster('all')}
+                      className={cn(selectedCluster === 'all' && "bg-blue-50 dark:bg-blue-900/20")}
+                    >
+                      All Clusters
+                    </DropdownMenuItem>
+                    {clusters.map((cluster) => (
+                      <DropdownMenuItem
+                        key={cluster.code}
+                        onClick={() => setSelectedCluster(cluster.code)}
+                        className={cn(
+                          selectedCluster === cluster.code && "bg-blue-50 dark:bg-blue-900/20"
+                        )}
+                      >
+                        <span className="font-medium">{cluster.name}</span>
+                        <span className="ml-2 text-xs text-gray-500">({cluster.code})</span>
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
               <Button
                 variant="outline"
                 size="icon"
@@ -389,8 +489,11 @@ export function Reports() {
                 <ArrowUpDown className="h-4 w-4" />
               </Button>
               <div className="text-sm text-gray-500 dark:text-gray-400">
-                Showing {startIndex + 1} to {Math.min(endIndex, reportData.length)} of {reportData.length} items
-                {` (${sortOrder === 'asc' ? 'A-Z' : 'Z-A'})`}
+                {(() => {
+                  const { totalItems, data } = getSortedAndPaginatedData();
+                  const startIndex = (currentPage - 1) * itemsPerPage;
+                  return `Showing ${startIndex + 1} to ${startIndex + data.length} of ${totalItems} items ${selectedCluster !== 'all' ? `(Filtered by ${selectedCluster})` : ''} ${sortOrder === 'asc' ? '(A-Z)' : '(Z-A)'}`;
+                })()}
               </div>
             </div>
           </div>
@@ -419,7 +522,7 @@ export function Reports() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {getSortedAndPaginatedData().map((row, index) => (
+                    {getSortedAndPaginatedData().data.map((row, index) => (
                       <TableRow key={index}>
                         {Object.values(row).map((value, i) => (
                           <TableCell key={i}>
@@ -433,7 +536,7 @@ export function Reports() {
               </div>
 
               {/* Pagination */}
-              {totalPages > 1 && (
+              {getSortedAndPaginatedData().totalPages > 1 && (
                 <div className="mt-6 flex justify-end items-center px-4">
                   <div className="flex items-center gap-2">
                     <Button
@@ -447,9 +550,9 @@ export function Reports() {
                     </Button>
 
                     <div className="flex items-center gap-1">
-                      {Array.from({ length: totalPages }, (_, i) => i + 1)
+                      {Array.from({ length: getSortedAndPaginatedData().totalPages }, (_, i) => i + 1)
                         .filter(page => {
-                          if (page === 1 || page === totalPages) return true;
+                          if (page === 1 || page === getSortedAndPaginatedData().totalPages) return true;
                           if (page >= currentPage - 1 && page <= currentPage + 1) return true;
                           return false;
                         })
@@ -476,8 +579,8 @@ export function Reports() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                      disabled={currentPage === totalPages}
+                      onClick={() => setCurrentPage(prev => Math.min(getSortedAndPaginatedData().totalPages, prev + 1))}
+                      disabled={currentPage === getSortedAndPaginatedData().totalPages}
                       className="gap-2"
                     >
                       Next

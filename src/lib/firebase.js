@@ -35,44 +35,42 @@ export const clusters = [
   { code: 'BRD', name: 'Board & Display' }
 ];
 
-// Get next ID for supplies with cluster prefix
-export const getNextSupplyId = async (clusterCode) => {
-  try {
-    // Get the counter document for the specific cluster
-    const counterRef = doc(db, 'counters', `supplies_${clusterCode}`);
-    const counterDoc = await getDoc(counterRef);
-    
-    let nextId;
-    if (!counterDoc.exists()) {
-      // Initialize counter if it doesn't exist
-      nextId = 1;
-      await setDoc(counterRef, { currentId: nextId });
-    } else {
-      // Increment existing counter
-      nextId = counterDoc.data().currentId + 1;
-      await updateDoc(counterRef, { currentId: nextId });
-    }
-    
-    // Format ID with cluster prefix and 4 digits (e.g., OFC-0001)
-    return `${clusterCode}-${nextId.toString().padStart(4, '0')}`;
-  } catch (error) {
-    console.error("Error generating next ID:", error);
-    throw error;
+// Helper function to get the next ID number for a cluster
+async function getNextIdForCluster(cluster) {
+  const suppliesRef = collection(db, "supplies");
+  const q = query(
+    suppliesRef,
+    where("id", ">=", `${cluster}-`),
+    where("id", "<=", `${cluster}-\uf8ff`),
+    orderBy("id", "desc"),
+    limit(1)
+  );
+
+  const snapshot = await getDocs(q);
+  if (snapshot.empty) {
+    return `${cluster}-001`; // First item in this cluster
   }
-};
+
+  const lastId = snapshot.docs[0].data().id;
+  const lastNumber = parseInt(lastId.split('-')[1]);
+  const nextNumber = lastNumber + 1;
+  return `${cluster}-${nextNumber.toString().padStart(3, '0')}`;
+}
 
 // Supply Collection Functions
 export const addSupply = async (supplyData) => {
   try {
-    const supplyId = await getNextSupplyId(supplyData.cluster);
-    const docRef = await setDoc(doc(db, "supplies", supplyId), {
+    const newId = await getNextIdForCluster(supplyData.cluster);
+    const supplyRef = doc(db, "supplies", newId);
+    
+    await setDoc(supplyRef, {
       ...supplyData,
-      id: supplyId,
-      dateAdded: Timestamp.now(),
-      createdAt: Timestamp.now(),
-      updatedAt: Timestamp.now()
+      id: newId,
+      dateAdded: serverTimestamp(),
+      dateUpdated: serverTimestamp()
     });
-    return supplyId;
+
+    return newId;
   } catch (error) {
     console.error("Error adding supply:", error);
     throw error;
@@ -108,10 +106,39 @@ export const getSupplies = async (lastDoc = null, itemsPerPage = 20) => {
   }
 };
 
-export const updateSupply = async (supplyId, updateData) => {
+export const updateSupply = async (id, updatedData) => {
   try {
-    const supplyRef = doc(db, "supplies", supplyId);
-    await updateDoc(supplyRef, updateData);
+    const supplyRef = doc(db, "supplies", id);
+    const currentSupply = (await getDoc(supplyRef)).data();
+
+    // If cluster is being changed, we need to update the ID
+    if (updatedData.cluster && currentSupply.cluster !== updatedData.cluster) {
+      // Get new ID for the new cluster
+      const newId = await getNextIdForCluster(updatedData.cluster);
+      
+      // Create new document with new ID
+      const newSupplyRef = doc(db, "supplies", newId);
+      
+      // Merge current data with updates and new ID
+      await setDoc(newSupplyRef, {
+        ...currentSupply,
+        ...updatedData,
+        id: newId,
+        dateUpdated: serverTimestamp()
+      });
+
+      // Delete old document
+      await deleteDoc(supplyRef);
+
+      return newId; // Return new ID for UI update
+    } else {
+      // If cluster isn't changing, just update normally
+      await updateDoc(supplyRef, {
+        ...updatedData,
+        dateUpdated: serverTimestamp()
+      });
+      return id;
+    }
   } catch (error) {
     console.error("Error updating supply:", error);
     throw error;
@@ -146,6 +173,19 @@ export const searchSupplies = async (searchTerm) => {
     return supplies;
   } catch (error) {
     console.error("Error searching supplies:", error);
+    throw error;
+  }
+}; 
+
+// Add new classification
+export const addClassification = async (name) => {
+  try {
+    await addDoc(collection(db, "classifications"), {
+      name: name.trim(),
+      createdAt: serverTimestamp()
+    });
+  } catch (error) {
+    console.error("Error adding classification:", error);
     throw error;
   }
 }; 
