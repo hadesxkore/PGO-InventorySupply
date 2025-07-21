@@ -296,18 +296,27 @@ export function SuppliesStock() {
         imageUrl = await uploadImage(selectedImage);
       }
 
+      // Add the supply
       await addSupply({
         ...newSupply,
         image: imageUrl,
         quantity: parseInt(newSupply.quantity),
-        availability: parseInt(newSupply.quantity), // Add initial availability
+        availability: parseInt(newSupply.quantity),
       });
 
       setDialogOpen(false);
-      setNewSupply({ name: "", quantity: "", unit: "", image: "", cluster: "", classification: "" });
+      setNewSupply({
+        name: "",
+        quantity: "",
+        unit: "",
+        image: "",
+        cluster: "",
+        classification: "",
+      });
       setSelectedImage(null);
       toast.success("Supply added successfully");
     } catch (error) {
+      console.error("Error adding supply:", error);
       toast.error("Failed to add supply");
     } finally {
       setLoading(false);
@@ -404,7 +413,8 @@ export function SuppliesStock() {
           
           // Check if item already exists
           const existingItems = allSupplies.filter(supply => 
-            supply.name.toLowerCase() === trimmedName.toLowerCase()
+            supply.name.toLowerCase() === trimmedName.toLowerCase() &&
+            supply.classification?.toLowerCase() === (newSupply.classification || '').toLowerCase()
           );
 
           if (existingItems.length === 0) {
@@ -1096,7 +1106,7 @@ export function SuppliesStock() {
                     </TableRow>
                   ) : (
                     currentSupplies.map((supply) => (
-                      <TableRow key={supply.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                      <TableRow key={supply.docId} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
                         <TableCell className="font-mono">{supply.id}</TableCell>
                         <TableCell>
                           {supply.image ? (
