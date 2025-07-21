@@ -68,6 +68,7 @@ export function ReleaseSupply() {
 
   const [newRelease, setNewRelease] = useState({
     supplyId: "",
+    supplyDocId: "", // Add docId field
     supplyName: "",
     quantity: "",
     receivedBy: "",
@@ -138,8 +139,8 @@ export function ReleaseSupply() {
     try {
       // Start a Firestore transaction
       await runTransaction(db, async (transaction) => {
-        // Get the supply document
-        const supplyRef = doc(db, "supplies", selectedSupply);
+        // Get the supply document using docId
+        const supplyRef = doc(db, "supplies", newRelease.supplyDocId);
         const supplyDoc = await transaction.get(supplyRef);
 
         if (!supplyDoc.exists()) {
@@ -148,7 +149,7 @@ export function ReleaseSupply() {
 
         // Check if there's enough availability
         const currentQuantity = supplyDoc.data().quantity || 0;
-        const currentAvailability = supplyDoc.data().availability ?? currentQuantity; // Initialize if not set
+        const currentAvailability = supplyDoc.data().availability ?? currentQuantity;
         const releaseQuantity = parseInt(newRelease.quantity);
 
         if (releaseQuantity > currentAvailability) {
@@ -157,22 +158,23 @@ export function ReleaseSupply() {
 
         const newAvailability = currentAvailability - releaseQuantity;
 
-        // Get the next release ID with RLS prefix
+        // Get all releases to determine the next ID
         const releasesRef = collection(db, "releases");
-        const releasesSnapshot = await getDocs(query(releasesRef, orderBy("id", "desc"), limit(1)));
-        let nextNumber = 1;
+        const releasesQuery = query(releasesRef, orderBy("id", "desc"), limit(1));
+        const releasesSnapshot = await getDocs(releasesQuery);
         
+        // Generate the next release ID
+        let nextNumber = 1;
         if (!releasesSnapshot.empty) {
-          const lastId = releasesSnapshot.docs[0].data().id;
-          const lastNumber = parseInt(lastId.split('-')[1]);
+          const lastRelease = releasesSnapshot.docs[0].data();
+          const lastNumber = parseInt(lastRelease.id.split('-')[1]);
           nextNumber = lastNumber + 1;
         }
-        
-        const nextReleaseId = `RLS-${String(nextNumber).padStart(5, '0')}`;
+        const newReleaseId = `RLS-${String(nextNumber).padStart(5, '0')}`;
 
         // Create the release document
         const releaseData = {
-          id: nextReleaseId,
+          id: newReleaseId,
           ...newRelease,
           createdAt: Timestamp.now(),
           status: "released",
@@ -192,6 +194,7 @@ export function ReleaseSupply() {
       setDialogOpen(false);
       setNewRelease({
         supplyId: "",
+        supplyDocId: "",
         supplyName: "",
         quantity: "",
         receivedBy: "",
@@ -297,12 +300,13 @@ export function ReleaseSupply() {
                       <CommandGroup className="max-h-[300px] overflow-auto">
                         {supplies.map((supply) => (
                           <CommandItem
-                            key={supply.id}
+                            key={supply.docId}
                             onSelect={() => {
                               setSelectedSupply(supply.id);
                               setNewRelease(prev => ({
                                 ...prev,
                                 supplyId: supply.id,
+                                supplyDocId: supply.docId,
                                 supplyName: supply.name
                               }));
                               setOpen(false);
