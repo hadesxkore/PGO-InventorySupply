@@ -62,7 +62,7 @@ import {
   addClassification
 } from "../../lib/firebase";
 import { collection, query, orderBy, where, addDoc, getDocs, onSnapshot, limit, startAfter } from "firebase/firestore";
-import { Search, Plus, Pencil, Trash2, Package, Boxes, AlertTriangle, XCircle, Calendar, ArrowUpDown, FileText, Check } from "lucide-react";
+import { Search, Plus, Pencil, Trash2, Package, Boxes, AlertTriangle, XCircle, Calendar, ArrowUpDown, FileText, Check, ChevronDown, ChevronUp } from "lucide-react";
 import { format } from "date-fns";
 import { Calendar as CalendarComponent } from "../ui/calendar";
 import { Skeleton } from "../ui/skeleton";
@@ -92,7 +92,9 @@ export function SuppliesStock() {
     units, 
     classifications, 
     isLoading: isContextLoading,
-    updateSupplyOptimized 
+    updateSupplyOptimized,
+    deleteSupplyOptimized,
+    addSupplyOptimized
   } = useSupplies();
   const [filteredSupplies, setFilteredSupplies] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -113,6 +115,7 @@ export function SuppliesStock() {
   const [classificationSearchQuery, setClassificationSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 15;
+  const [sortField, setSortField] = useState('name');
   const [sortOrder, setSortOrder] = useState('asc');
   const [stockFilter, setStockFilter] = useState('all');
   const [unitSearchOpen, setUnitSearchOpen] = useState(false);
@@ -175,9 +178,9 @@ export function SuppliesStock() {
     setCurrentPage(1);
   }, [searchTerm, selectedDate]);
 
-  // Local search and filter function
+  // Modified search and sort effect
   useEffect(() => {
-    console.log('Applying filters:', { searchTerm, selectedDate, stockFilter, sortOrder });
+    console.log('Applying filters:', { searchTerm, selectedDate, stockFilter, sortField, sortOrder });
     let filtered = allSupplies;
 
     if (searchTerm.trim()) {
@@ -195,7 +198,7 @@ export function SuppliesStock() {
       endOfDay.setHours(23, 59, 59, 999);
 
       filtered = filtered.filter(supply => {
-        const supplyDate = supply.createdAt?.toDate();
+        const supplyDate = supply.dateAdded?.toDate();
         return supplyDate >= startOfDay && supplyDate <= endOfDay;
       });
     }
@@ -214,15 +217,50 @@ export function SuppliesStock() {
 
     // Apply sort
     filtered = [...filtered].sort((a, b) => {
-      const nameA = a.name.toLowerCase();
-      const nameB = b.name.toLowerCase();
-      return sortOrder === 'asc' ? nameA.localeCompare(nameB) : nameB.localeCompare(nameA);
-    });
+      let compareA, compareB;
+      
+      switch (sortField) {
+        case 'id':
+          // Extract the numeric part for ID comparison
+          compareA = parseInt(a.id.split('-')[1]);
+          compareB = parseInt(b.id.split('-')[1]);
+          break;
+        case 'name':
+          compareA = a.name.toLowerCase();
+          compareB = b.name.toLowerCase();
+          break;
+        case 'quantity':
+          compareA = a.quantity;
+          compareB = b.quantity;
+          break;
+        case 'availability':
+          compareA = a.availability ?? a.quantity;
+          compareB = b.availability ?? b.quantity;
+          break;
+        case 'classification':
+          compareA = (a.classification || 'N/A').toLowerCase();
+          compareB = (b.classification || 'N/A').toLowerCase();
+          break;
+        case 'dateAdded':
+          compareA = a.dateAdded?.toDate().getTime() || 0;
+          compareB = b.dateAdded?.toDate().getTime() || 0;
+          break;
+        default:
+          compareA = a[sortField];
+          compareB = b[sortField];
+      }
 
-    console.log('Filtered results:', filtered.length);
+      if (sortOrder === 'asc') {
+        return compareA > compareB ? 1 : -1;
+      } else {
+        return compareA < compareB ? 1 : -1;
+      }
+    });
+    
+    console.log('Filtered and sorted results:', filtered.length);
     setFilteredSupplies(filtered);
     setCurrentPage(1); // Reset to first page when filters change
-  }, [searchTerm, selectedDate, stockFilter, allSupplies, sortOrder]);
+  }, [searchTerm, selectedDate, stockFilter, allSupplies, sortField, sortOrder]);
 
   // Render load more button
   const renderLoadMore = () => {
@@ -296,11 +334,10 @@ export function SuppliesStock() {
         imageUrl = await uploadImage(selectedImage);
       }
 
-      await addSupply({
+      await addSupplyOptimized({
         ...newSupply,
         image: imageUrl,
         quantity: parseInt(newSupply.quantity),
-        availability: parseInt(newSupply.quantity), // Add initial availability
       });
 
       setDialogOpen(false);
@@ -308,6 +345,7 @@ export function SuppliesStock() {
       setSelectedImage(null);
       toast.success("Supply added successfully");
     } catch (error) {
+      console.error("Error adding supply:", error);
       toast.error("Failed to add supply");
     } finally {
       setLoading(false);
@@ -371,7 +409,7 @@ export function SuppliesStock() {
     if (!selectedSupply) return;
 
     try {
-      await deleteSupply(selectedSupply.id);
+      await deleteSupplyOptimized(selectedSupply.id);
       setDeleteDialogOpen(false);
       setSelectedSupply(null);
       toast.success("Supply deleted successfully");
@@ -409,7 +447,7 @@ export function SuppliesStock() {
 
           if (existingItems.length === 0) {
             try {
-              await addSupply({
+              await addSupplyOptimized({
                 name: trimmedName,
                 quantity: 0, // Default quantity
                 unit: "pcs", // Default unit
@@ -452,9 +490,24 @@ export function SuppliesStock() {
     return new Date(timestamp).toLocaleString();
   };
 
-  // Add toggle sort function
-  const toggleSort = () => {
-    setSortOrder(current => current === 'asc' ? 'desc' : 'asc');
+  // Function to handle sort changes
+  const handleSort = (field) => {
+    if (sortField === field) {
+      // If clicking the same field, toggle direction
+      setSortOrder(current => current === 'asc' ? 'desc' : 'asc');
+    } else {
+      // If clicking a new field, set it and default to ascending
+      setSortField(field);
+      setSortOrder('asc');
+    }
+  };
+
+  // Helper function to render sort indicator
+  const renderSortIndicator = (field) => {
+    if (sortField !== field) return null;
+    return sortOrder === 'asc' ? 
+      <ChevronUp className="w-4 h-4" /> : 
+      <ChevronDown className="w-4 h-4" />;
   };
 
   return (
@@ -994,17 +1047,146 @@ export function SuppliesStock() {
                 </DropdownMenuContent>
               </DropdownMenu>
 
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={toggleSort}
-                className={cn(
-                  "h-10 w-10",
-                  sortOrder === 'desc' && "bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800"
-                )}
-              >
-                <ArrowUpDown className="h-4 w-4" />
-              </Button>
+              {/* Replace the sort button section with this dropdown */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="gap-2 min-w-[140px] justify-between"
+                  >
+                    <div className="flex items-center gap-2">
+                      <ArrowUpDown className="h-4 w-4" />
+                      Sort By
+                    </div>
+                    <ChevronDown className="h-4 w-4 opacity-50" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-[200px]">
+                  <DropdownMenuItem 
+                    className="font-medium text-sm text-muted-foreground px-2 py-1.5"
+                    disabled
+                  >
+                    Sort by ID
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setSortField('id');
+                      setSortOrder('asc');
+                    }}
+                    className={cn(
+                      "gap-2",
+                      sortField === 'id' && sortOrder === 'asc' && "bg-accent"
+                    )}
+                  >
+                    <ChevronUp className="h-4 w-4" /> Lowest to Highest
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setSortField('id');
+                      setSortOrder('desc');
+                    }}
+                    className={cn(
+                      "gap-2",
+                      sortField === 'id' && sortOrder === 'desc' && "bg-accent"
+                    )}
+                  >
+                    <ChevronDown className="h-4 w-4" /> Highest to Lowest
+                  </DropdownMenuItem>
+
+                  <DropdownMenuItem 
+                    className="font-medium text-sm text-muted-foreground px-2 py-1.5 mt-2"
+                    disabled
+                  >
+                    Sort by Name
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setSortField('name');
+                      setSortOrder('asc');
+                    }}
+                    className={cn(
+                      "gap-2",
+                      sortField === 'name' && sortOrder === 'asc' && "bg-accent"
+                    )}
+                  >
+                    <ChevronUp className="h-4 w-4" /> A to Z
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setSortField('name');
+                      setSortOrder('desc');
+                    }}
+                    className={cn(
+                      "gap-2",
+                      sortField === 'name' && sortOrder === 'desc' && "bg-accent"
+                    )}
+                  >
+                    <ChevronDown className="h-4 w-4" /> Z to A
+                  </DropdownMenuItem>
+
+                  <DropdownMenuItem 
+                    className="font-medium text-sm text-muted-foreground px-2 py-1.5 mt-2"
+                    disabled
+                  >
+                    Sort by Quantity
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setSortField('quantity');
+                      setSortOrder('asc');
+                    }}
+                    className={cn(
+                      "gap-2",
+                      sortField === 'quantity' && sortOrder === 'asc' && "bg-accent"
+                    )}
+                  >
+                    <ChevronUp className="h-4 w-4" /> Lowest to Highest
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setSortField('quantity');
+                      setSortOrder('desc');
+                    }}
+                    className={cn(
+                      "gap-2",
+                      sortField === 'quantity' && sortOrder === 'desc' && "bg-accent"
+                    )}
+                  >
+                    <ChevronDown className="h-4 w-4" /> Highest to Lowest
+                  </DropdownMenuItem>
+
+                  <DropdownMenuItem 
+                    className="font-medium text-sm text-muted-foreground px-2 py-1.5 mt-2"
+                    disabled
+                  >
+                    Sort by Date Added
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setSortField('dateAdded');
+                      setSortOrder('asc');
+                    }}
+                    className={cn(
+                      "gap-2",
+                      sortField === 'dateAdded' && sortOrder === 'asc' && "bg-accent"
+                    )}
+                  >
+                    <ChevronUp className="h-4 w-4" /> Oldest First
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setSortField('dateAdded');
+                      setSortOrder('desc');
+                    }}
+                    className={cn(
+                      "gap-2",
+                      sortField === 'dateAdded' && sortOrder === 'desc' && "bg-accent"
+                    )}
+                  >
+                    <ChevronDown className="h-4 w-4" /> Newest First
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
 
               <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
                 <PopoverTrigger asChild>
@@ -1043,6 +1225,7 @@ export function SuppliesStock() {
                 Showing {filteredSupplies.length} supplies
                 {selectedDate && ` for ${format(selectedDate, 'PP')}`}
                 {stockFilter !== 'all' && ` (${stockFilter === 'low' ? 'Low Stock' : 'Out of Stock'})`}
+                {` (Sorted by ${sortField} ${sortOrder === 'asc' ? '↑' : '↓'})`}
               </div>
             </div>
           </div>
@@ -1055,15 +1238,57 @@ export function SuppliesStock() {
               <Table>
                 <TableHeader className="sticky top-0 bg-white dark:bg-gray-800 shadow-sm z-10">
                   <TableRow>
-                    <TableHead className="w-[120px]">ID</TableHead>
+                    <TableHead 
+                      className="w-[120px] cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                      onClick={() => handleSort('id')}
+                    >
+                      <div className="flex items-center gap-1">
+                        ID {renderSortIndicator('id')}
+                      </div>
+                    </TableHead>
                     <TableHead className="w-[100px]">Image</TableHead>
-                    <TableHead className="min-w-[200px]">Name</TableHead>
-                    <TableHead className="w-[150px]">Classification</TableHead>
-                    <TableHead className="w-[100px]">Quantity</TableHead>
-                    <TableHead className="w-[100px]">Availability</TableHead>
+                    <TableHead 
+                      className="min-w-[200px] cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                      onClick={() => handleSort('name')}
+                    >
+                      <div className="flex items-center gap-1">
+                        Name {renderSortIndicator('name')}
+                      </div>
+                    </TableHead>
+                    <TableHead 
+                      className="w-[150px] cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                      onClick={() => handleSort('classification')}
+                    >
+                      <div className="flex items-center gap-1">
+                        Classification {renderSortIndicator('classification')}
+                      </div>
+                    </TableHead>
+                    <TableHead 
+                      className="w-[100px] cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                      onClick={() => handleSort('quantity')}
+                    >
+                      <div className="flex items-center gap-1">
+                        Quantity {renderSortIndicator('quantity')}
+                      </div>
+                    </TableHead>
+                    <TableHead 
+                      className="w-[100px] cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                      onClick={() => handleSort('availability')}
+                    >
+                      <div className="flex items-center gap-1">
+                        Availability {renderSortIndicator('availability')}
+                      </div>
+                    </TableHead>
                     <TableHead className="w-[100px]">Unit</TableHead>
                     <TableHead className="w-[100px]">Cluster</TableHead>
-                    <TableHead className="min-w-[180px]">Date Added</TableHead>
+                    <TableHead 
+                      className="min-w-[180px] cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                      onClick={() => handleSort('dateAdded')}
+                    >
+                      <div className="flex items-center gap-1">
+                        Date Added {renderSortIndicator('dateAdded')}
+                      </div>
+                    </TableHead>
                     <TableHead className="w-[180px] text-right pr-4">Actions</TableHead>
                   </TableRow>
                 </TableHeader>

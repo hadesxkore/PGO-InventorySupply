@@ -11,48 +11,61 @@ export function SuppliesProvider({ children }) {
   const [classifications, setClassifications] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Cache for next IDs
-  const [clusterIdCache, setClusterIdCache] = useState({});
+  // Function to find the lowest available ID for a cluster
+  const findLowestAvailableId = async (cluster) => {
+    try {
+      // Get all supplies for this cluster
+      const suppliesRef = collection(db, "supplies");
+      const q = query(
+        suppliesRef,
+        where("id", ">=", `${cluster}-`),
+        where("id", "<=", `${cluster}-\uf8ff`),
+        orderBy("id", "asc")
+      );
 
-  // Function to get next ID from cache or Firestore
-  const getNextIdForClusterCached = async (cluster) => {
-    // If we have a cached next ID for this cluster, use it
-    if (clusterIdCache[cluster]) {
-      const nextId = clusterIdCache[cluster];
-      // Update cache with next number
-      const currentNumber = parseInt(nextId.split('-')[1]);
-      setClusterIdCache(prev => ({
-        ...prev,
-        [cluster]: `${cluster}-${(currentNumber + 1).toString().padStart(4, '0')}`
-      }));
-      return nextId;
+      const snapshot = await getDocs(q);
+      const existingIds = snapshot.docs.map(doc => {
+        const id = doc.data().id;
+        return parseInt(id.split('-')[1]);
+      });
+
+      // If no IDs exist, start with 1
+      if (existingIds.length === 0) {
+        return `${cluster}-${String(1).padStart(4, '0')}`;
+      }
+
+      // Find the first gap in the sequence
+      let expectedNumber = 1;
+      for (const actualNumber of existingIds) {
+        if (actualNumber !== expectedNumber) {
+          // We found a gap
+          return `${cluster}-${String(expectedNumber).padStart(4, '0')}`;
+        }
+        expectedNumber++;
+      }
+
+      // If no gaps found, use the next number
+      return `${cluster}-${String(expectedNumber).padStart(4, '0')}`;
+    } catch (error) {
+      console.error("Error finding lowest available ID:", error);
+      throw error;
     }
+  };
 
-    // If no cache, get from Firestore and cache next few numbers
-    const suppliesRef = collection(db, "supplies");
-    const q = query(
-      suppliesRef,
-      where("id", ">=", `${cluster}-`),
-      where("id", "<=", `${cluster}-\uf8ff`),
-      orderBy("id", "desc"),
-      limit(1)
-    );
-
-    const snapshot = await getDocs(q);
-    let nextNumber = 1;
-    if (!snapshot.empty) {
-      const lastId = snapshot.docs[0].data().id;
-      nextNumber = parseInt(lastId.split('-')[1]) + 1;
+  // Delete supply function
+  const deleteSupplyOptimized = async (supplyId) => {
+    try {
+      // Delete from Firestore
+      await deleteDoc(doc(db, "supplies", supplyId));
+      
+      // Update local state
+      setAllSupplies(prev => prev.filter(supply => supply.id !== supplyId));
+      
+      return true;
+    } catch (error) {
+      console.error("Error deleting supply:", error);
+      throw error;
     }
-
-    // Cache next few IDs for this cluster
-    const nextId = `${cluster}-${nextNumber.toString().padStart(4, '0')}`;
-    setClusterIdCache(prev => ({
-      ...prev,
-      [cluster]: `${cluster}-${(nextNumber + 1).toString().padStart(4, '0')}`
-    }));
-
-    return nextId;
   };
 
   // Optimized update function
@@ -62,9 +75,9 @@ export function SuppliesProvider({ children }) {
       const currentSupply = allSupplies.find(s => s.id === id);
       if (!currentSupply) throw new Error("Supply not found!");
 
-      // If cluster is changing, get new ID from cache
+      // If cluster is changing, get new ID
       if (updatedData.cluster && currentSupply.cluster !== updatedData.cluster) {
-        const newId = await getNextIdForClusterCached(updatedData.cluster);
+        const newId = await findLowestAvailableId(updatedData.cluster);
         
         const updatedSupplyData = {
           ...currentSupply,
@@ -112,6 +125,34 @@ export function SuppliesProvider({ children }) {
       }
     } catch (error) {
       console.error("Error in optimized supply update:", error);
+      throw error;
+    }
+  };
+
+  // Add supply function with optimized ID generation
+  const addSupplyOptimized = async (supplyData) => {
+    try {
+      const { cluster } = supplyData;
+      if (!cluster) throw new Error("Cluster is required");
+
+      // Find the lowest available ID for this cluster
+      const newId = await findLowestAvailableId(cluster);
+
+      const newSupplyData = {
+        ...supplyData,
+        id: newId,
+        dateAdded: new Date(),
+        dateUpdated: new Date(),
+        availability: supplyData.quantity
+      };
+
+      // Add to Firestore
+      await setDoc(doc(db, "supplies", newId), newSupplyData);
+
+      // Local state will be updated by the onSnapshot listener
+      return newId;
+    } catch (error) {
+      console.error("Error adding supply:", error);
       throw error;
     }
   };
@@ -168,7 +209,9 @@ export function SuppliesProvider({ children }) {
     units,
     classifications,
     isLoading,
-    updateSupplyOptimized  // Add this to the context value
+    updateSupplyOptimized,
+    deleteSupplyOptimized,
+    addSupplyOptimized
   };
 
   return (

@@ -3,10 +3,12 @@ import { collection, query, orderBy, getDocs, where, Timestamp, onSnapshot } fro
 import { db } from './firebase';
 import { toast } from 'sonner';
 import { addDays } from 'date-fns';
+import { useSupplies } from './SuppliesContext';
 
 const ReportsContext = createContext();
 
 export function ReportsProvider({ children }) {
+  const { allSupplies } = useSupplies();
   const [reportsData, setReportsData] = useState({
     supplies: [],
     deliveries: [],
@@ -18,59 +20,69 @@ export function ReportsProvider({ children }) {
     to: new Date(),
   });
 
-  // Fetch reports data
+  // Transform supplies data whenever allSupplies changes
+  useEffect(() => {
+    const transformedSupplies = allSupplies.map(doc => ({
+      ID: doc.id,
+      Name: doc.name || '-',
+      Classification: doc.classification || 'N/A',
+      Quantity: doc.quantity || 0,
+      Unit: doc.unit || 'pcs',
+      Cluster: doc.cluster || '-',
+      "Date Added": doc.dateAdded?.toDate().toLocaleString() || '-'
+    }));
+
+    setReportsData(prev => ({
+      ...prev,
+      supplies: transformedSupplies
+    }));
+  }, [allSupplies]);
+
+  // Fetch reports data for deliveries and releases
   useEffect(() => {
     setIsLoading(true);
     console.log('ReportsContext: Starting data fetch with date range:', dateRange);
 
-    const startDate = Timestamp.fromDate(dateRange.from);
-    const endDate = Timestamp.fromDate(dateRange.to);
+    const startDate = Timestamp.fromDate(new Date(dateRange.from.setHours(0, 0, 0, 0)));
+    const endDate = Timestamp.fromDate(new Date(dateRange.to.setHours(23, 59, 59, 999)));
 
     // Helper function to transform document data
     const transformData = (doc, type) => {
+      const data = doc.data();
       const baseData = {
-        ID: doc.id,
-        Classification: doc.data().classification || 'N/A',
-        Quantity: doc.data().quantity || 0,
+        ID: data.id || doc.id, // Use the custom ID if available, fallback to Firestore ID
+        "Supply Name": data.supplyName || '-',
+        Classification: data.classification || 'N/A',
+        Quantity: data.quantity || 0,
+        Unit: data.unit || 'pcs',
       };
 
-      switch (type) {
-        case 'supplies':
-          return {
-            ...baseData,
-            Name: doc.data().name || '-',
-            Unit: doc.data().unit || 'pcs',
-            Cluster: doc.data().cluster || '-',
-            "Date Added": doc.data().createdAt?.toDate().toLocaleString() || '-'
-          };
-        case 'deliveries':
-          return {
-            ...baseData,
-            "Supply Name": doc.data().supplyName || '-',
-            "Delivered By": doc.data().deliveredBy || '-',
-            Notes: doc.data().notes || '-',
-            "Date & Time": doc.data().createdAt?.toDate().toLocaleString() || '-'
-          };
-        case 'releases':
-          return {
-            ...baseData,
-            "Supply Name": doc.data().supplyName || '-',
-            "Received By": doc.data().receivedBy || '-',
-            Department: doc.data().department || '-',
-            Purpose: doc.data().purpose || '-',
-            "Date Released": doc.data().createdAt?.toDate().toLocaleString() || '-'
-          };
-        default:
-          return baseData;
+      if (type === 'deliveries') {
+        return {
+          ...baseData,
+          "Delivered By": data.deliveredBy || '-',
+          Notes: data.notes || '-',
+          "Date & Time": data.createdAt?.toDate().toLocaleString() || '-'
+        };
+      } else if (type === 'releases') {
+        return {
+          ...baseData,
+          "Received By": data.receivedBy || '-',
+          Department: data.department || '-',
+          Purpose: data.purpose || '-',
+          "Date Released": data.createdAt?.toDate().toLocaleString() || '-'
+        };
       }
+
+      return baseData;
     };
 
-    // Create queries for each collection
-    const collections = ['supplies', 'deliveries', 'releases'];
+    // Create queries for deliveries and releases
+    const collections = ['deliveries', 'releases'];
     const unsubscribers = [];
 
     collections.forEach(collectionName => {
-      console.log(`ReportsContext: Setting up listener for ${collectionName}`);
+      console.log(`ReportsContext: Setting up listener for ${collectionName} between ${startDate.toDate()} and ${endDate.toDate()}`);
       
       const q = query(
         collection(db, collectionName),
@@ -90,7 +102,11 @@ export function ReportsProvider({ children }) {
           };
           console.log('ReportsContext: Updated data state:', {
             collectionName,
-            totalItems: Object.values(updated).reduce((sum, arr) => sum + arr.length, 0)
+            totalItems: data.length,
+            dateRange: {
+              from: startDate.toDate(),
+              to: endDate.toDate()
+            }
           });
           return updated;
         });

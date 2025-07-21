@@ -244,70 +244,70 @@ export function ReleaseSupply() {
           <h1 className="text-2xl font-semibold text-gray-800 dark:text-white">Release Supply</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">Manage and track supply releases</p>
         </div>
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger asChild>
+          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+            <DialogTrigger asChild>
             <Button
               variant="secondary"
               size="lg"
               className="bg-gray-900 hover:bg-gray-800 text-white dark:bg-gray-800 dark:hover:bg-gray-700 gap-2"
             >
-              <Share2 className="w-4 h-4" />
-              Release Supply
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-[600px]">
-            <DialogHeader>
+                <Share2 className="w-4 h-4" />
+                Release Supply
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-[600px]">
+              <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Share2 className="w-5 h-5" />
                 Release Supply
               </DialogTitle>
-              <DialogDescription>
+                <DialogDescription>
                 Fill out the form below to release a supply item.
-              </DialogDescription>
-            </DialogHeader>
+                </DialogDescription>
+              </DialogHeader>
 
             <form onSubmit={handleAddRelease} className="space-y-6">
               {/* Supply Selection */}
-              <div className="space-y-2">
+                  <div className="space-y-2">
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
                   Select Supply
                 </label>
-                <Popover open={open} onOpenChange={setOpen}>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      role="combobox"
-                      aria-expanded={open}
-                      className="w-full justify-between"
-                    >
-                      {selectedSupply
-                        ? supplies.find((supply) => supply.id === selectedSupply)?.name
+                    <Popover open={open} onOpenChange={setOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          role="combobox"
+                          aria-expanded={open}
+                          className="w-full justify-between"
+                        >
+                          {selectedSupply
+                            ? supplies.find((supply) => supply.id === selectedSupply)?.name
                         : "Select a supply..."}
-                      <Package className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                    </Button>
-                  </PopoverTrigger>
+                          <Package className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
                   <PopoverContent className="w-[400px] p-0">
-                    <Command>
-                      <CommandInput
-                        placeholder="Search supplies..."
-                        value={commandInputValue}
-                        onValueChange={setCommandInputValue}
-                      />
+                        <Command>
+                          <CommandInput 
+                            placeholder="Search supplies..." 
+                            value={commandInputValue}
+                            onValueChange={setCommandInputValue}
+                          />
                       <CommandEmpty>No supplies found.</CommandEmpty>
-                      <CommandGroup className="max-h-[300px] overflow-auto">
+                          <CommandGroup className="max-h-[300px] overflow-auto">
                         {supplies.map((supply) => (
-                          <CommandItem
-                            key={supply.id}
-                            onSelect={() => {
-                              setSelectedSupply(supply.id);
-                              setNewRelease(prev => ({
-                                ...prev,
-                                supplyId: supply.id,
-                                supplyName: supply.name
-                              }));
-                              setOpen(false);
-                            }}
-                          >
+                                  <CommandItem
+                                    key={supply.id}
+                                    onSelect={() => {
+                                      setSelectedSupply(supply.id);
+                                      setNewRelease(prev => ({
+                                        ...prev,
+                                        supplyId: supply.id,
+                                        supplyName: supply.name
+                                      }));
+                                      setOpen(false);
+                                    }}
+                                  >
                             <div className="flex items-center gap-2">
                               {supply.image ? (
                                 <img
@@ -324,7 +324,7 @@ export function ReleaseSupply() {
                                   Available: {supply.availability ?? supply.quantity}
                                 </p>
                               </div>
-                            </div>
+                                    </div>
                             <Check
                               className={cn(
                                 "ml-auto h-4 w-4",
@@ -333,67 +333,67 @@ export function ReleaseSupply() {
                                   : "opacity-0"
                               )}
                             />
-                          </CommandItem>
-                        ))}
-                      </CommandGroup>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
-              </div>
+                                  </CommandItem>
+                                ))}
+                          </CommandGroup>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
 
               {/* Quantity */}
-              <div className="space-y-2">
+                  <div className="space-y-2">
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
                   Quantity
                 </label>
-                <Input
-                  type="number"
-                  min="1"
-                  value={newRelease.quantity}
-                  onChange={(e) => setNewRelease(prev => ({ ...prev, quantity: e.target.value }))}
+                    <Input
+                      type="number"
+                      min="1"
+                      value={newRelease.quantity}
+                      onChange={(e) => setNewRelease(prev => ({ ...prev, quantity: e.target.value }))}
                   placeholder="Enter quantity"
                   required
-                />
-              </div>
+                    />
+                  </div>
 
               {/* Received By */}
-              <div className="space-y-2">
+                  <div className="space-y-2">
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
                   Received By
                 </label>
-                <Input
-                  value={newRelease.receivedBy}
-                  onChange={(e) => setNewRelease(prev => ({ ...prev, receivedBy: e.target.value }))}
+                    <Input
+                      value={newRelease.receivedBy}
+                      onChange={(e) => setNewRelease(prev => ({ ...prev, receivedBy: e.target.value }))}
                   placeholder="Enter recipient name"
                   required
-                />
-              </div>
+                    />
+                  </div>
 
               {/* Department */}
-              <div className="space-y-2">
+                  <div className="space-y-2">
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
                   Department
                 </label>
-                <Input
-                  value={newRelease.department}
-                  onChange={(e) => setNewRelease(prev => ({ ...prev, department: e.target.value }))}
-                  placeholder="Enter department"
+                    <Input
+                      value={newRelease.department}
+                      onChange={(e) => setNewRelease(prev => ({ ...prev, department: e.target.value }))}
+                      placeholder="Enter department"
                   required
-                />
-              </div>
+                    />
+                  </div>
 
               {/* Purpose */}
-              <div className="space-y-2">
+                  <div className="space-y-2">
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
                   Purpose
                 </label>
-                <Input
-                  value={newRelease.purpose}
-                  onChange={(e) => setNewRelease(prev => ({ ...prev, purpose: e.target.value }))}
+                    <Input
+                      value={newRelease.purpose}
+                      onChange={(e) => setNewRelease(prev => ({ ...prev, purpose: e.target.value }))}
                   placeholder="Enter purpose"
                   required
-                />
-              </div>
+                    />
+                </div>
 
               {/* Submit Button */}
               <div className="flex justify-end gap-2">
@@ -422,54 +422,54 @@ export function ReleaseSupply() {
                   )}
                 </Button>
               </div>
-            </form>
-          </DialogContent>
-        </Dialog>
-      </div>
+              </form>
+            </DialogContent>
+          </Dialog>
+        </div>
 
-      {/* Stats Cards */}
+        {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 px-6">
         <Card className="bg-blue-50/50 dark:bg-blue-900/20">
           <CardContent className="p-6">
             <div className="flex items-center justify-between">
-              <div>
+                <div>
                 <p className="text-sm font-medium text-blue-600 dark:text-blue-400">Total Releases</p>
                 <h3 className="text-2xl font-bold text-blue-700 dark:text-blue-300">{stats.totalReleases}</h3>
-              </div>
+                </div>
               <div className="p-3 bg-blue-100 dark:bg-blue-900/40 rounded-full">
                 <Share2 className="w-5 h-5 text-blue-600 dark:text-blue-400" />
               </div>
             </div>
           </CardContent>
-        </Card>
+            </Card>
 
         <Card className="bg-green-50/50 dark:bg-green-900/20">
           <CardContent className="p-6">
             <div className="flex items-center justify-between">
-              <div>
+                <div>
                 <p className="text-sm font-medium text-green-600 dark:text-green-400">Today's Releases</p>
                 <h3 className="text-2xl font-bold text-green-700 dark:text-green-300">{stats.todayReleases}</h3>
-              </div>
+                </div>
               <div className="p-3 bg-green-100 dark:bg-green-900/40 rounded-full">
                 <History className="w-5 h-5 text-green-600 dark:text-green-400" />
               </div>
             </div>
           </CardContent>
-        </Card>
+            </Card>
 
         <Card className="bg-purple-50/50 dark:bg-purple-900/20">
           <CardContent className="p-6">
             <div className="flex items-center justify-between">
-              <div>
+                <div>
                 <p className="text-sm font-medium text-purple-600 dark:text-purple-400">Unique Recipients</p>
                 <h3 className="text-2xl font-bold text-purple-700 dark:text-purple-300">{stats.uniqueRecipients}</h3>
-              </div>
+                </div>
               <div className="p-3 bg-purple-100 dark:bg-purple-900/40 rounded-full">
                 <Users className="w-5 h-5 text-purple-600 dark:text-purple-400" />
               </div>
             </div>
           </CardContent>
-        </Card>
+            </Card>
       </div>
 
       {/* Table Section */}

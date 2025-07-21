@@ -438,14 +438,14 @@ export function Dashboard() {
                 <h2 className="text-xl font-bold text-blue-700">PROVINCIAL GOVERNMENT OF BATAAN</h2>
                 <p className="text-base text-gray-600">OFFICE OF THE PROVINCIAL GOVERNOR</p>
                 <p className="text-xs text-gray-400">
-                  {new Date().toLocaleDateString('en-US', { 
+                      {new Date().toLocaleDateString('en-US', { 
                     weekday: 'long',
                     year: 'numeric', 
-                    month: 'long', 
+                        month: 'long',
                     day: 'numeric' 
-                  })}
-                </p>
-              </div>
+                      })}
+                    </p>
+                  </div>
 
               {/* Stats Grid */}
               <div className="grid grid-cols-3 gap-6 text-center">
@@ -470,74 +470,74 @@ export function Dashboard() {
               <div className="mt-6">
                 <h4 className="text-lg font-semibold text-gray-700 mb-3">Inventory Distribution</h4>
                 <div className="w-full h-48 bg-gray-50 rounded-xl p-4">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={[
-                        {
-                          name: 'Current Status',
-                          totalSupplies: stats.totalSupplies,
-                          totalDeliveries: stats.totalDeliveries,
-                          totalReleases: stats.totalReleases
-                        }
-                      ]}
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={[
+                      {
+                        name: 'Current Status',
+                        totalSupplies: stats.totalSupplies,
+                        totalDeliveries: stats.totalDeliveries,
+                        totalReleases: stats.totalReleases
+                      }
+                    ]}
                       margin={{ top: 15, right: 25, left: 25, bottom: 15 }}
                       barSize={50}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                      <XAxis 
-                        dataKey="name" 
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis 
+                      dataKey="name" 
                         tick={{ fontSize: 14, fill: '#6B7280' }}
-                        tickLine={false}
-                        axisLine={false}
-                      />
-                      <YAxis
+                      tickLine={false}
+                      axisLine={false}
+                    />
+                    <YAxis
                         tick={{ fontSize: 14, fill: '#6B7280' }}
-                        tickLine={false}
-                        axisLine={false}
+                      tickLine={false}
+                      axisLine={false}
                         width={50}
-                      />
-                      <Tooltip
-                        content={({ active, payload }) => {
-                          if (active && payload && payload.length) {
-                            return (
+                    />
+                    <Tooltip
+                      content={({ active, payload }) => {
+                        if (active && payload && payload.length) {
+                          return (
                               <div className="bg-white p-4 shadow-lg rounded-lg border border-gray-200">
                                 <div className="space-y-2">
                                   <p className="text-sm text-blue-600 font-medium">
                                     Supplies: {payload[0]?.value || 0}
-                                  </p>
+                                </p>
                                   <p className="text-sm text-green-600 font-medium">
                                     Deliveries: {payload[1]?.value || 0}
-                                  </p>
+                                </p>
                                   <p className="text-sm text-red-600 font-medium">
                                     Releases: {payload[2]?.value || 0}
-                                  </p>
-                                </div>
+                                </p>
                               </div>
-                            );
-                          }
-                          return null;
-                        }}
-                      />
-                      <Bar 
-                        dataKey="totalSupplies" 
+                            </div>
+                          );
+                        }
+                        return null;
+                      }}
+                    />
+                    <Bar 
+                      dataKey="totalSupplies" 
                         name="Supplies"
                         fill="#3B82F6" 
-                        radius={[6, 6, 0, 0]}
-                      />
-                      <Bar 
-                        dataKey="totalDeliveries" 
+                      radius={[6, 6, 0, 0]}
+                    />
+                    <Bar 
+                      dataKey="totalDeliveries" 
                         name="Deliveries"
                         fill="#10B981" 
-                        radius={[6, 6, 0, 0]}
-                      />
-                      <Bar 
-                        dataKey="totalReleases" 
+                      radius={[6, 6, 0, 0]}
+                    />
+                    <Bar 
+                      dataKey="totalReleases" 
                         name="Releases"
                         fill="#EF4444" 
-                        radius={[6, 6, 0, 0]}
-                      />
-                    </BarChart>
-                  </ResponsiveContainer>
+                      radius={[6, 6, 0, 0]}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
                 </div>
               </div>
             </motion.div>
