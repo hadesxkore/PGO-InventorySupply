@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect } from 'react';
-import { collection, query, orderBy, onSnapshot, where, getDocs, limit, deleteDoc, setDoc, updateDoc, doc } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, where, getDocs, limit, deleteDoc, setDoc, updateDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { db } from './firebase';
 import { toast } from 'sonner';
 
@@ -69,13 +69,16 @@ export function SuppliesProvider({ children }) {
   };
 
   // Optimized update function
-  const updateSupplyOptimized = async (id, updatedData) => {
+  const updateSupplyOptimized = async (id, updatedData, docId) => {
     try {
       // Find supply in local state first
       const currentSupply = allSupplies.find(s => s.id === id);
       if (!currentSupply) throw new Error("Supply not found!");
 
-      // If cluster is changing, get new ID
+      // Reference to the existing document
+      const supplyRef = doc(db, "supplies", docId);
+
+      // If cluster is changing, update the ID but keep the same document
       if (updatedData.cluster && currentSupply.cluster !== updatedData.cluster) {
         const newId = await findLowestAvailableId(updatedData.cluster);
         
@@ -83,7 +86,7 @@ export function SuppliesProvider({ children }) {
           ...currentSupply,
           ...updatedData,
           id: newId,
-          dateUpdated: new Date(),
+          dateUpdated: serverTimestamp(),
           name: updatedData.name || currentSupply.name,
           quantity: updatedData.quantity ?? currentSupply.quantity,
           unit: updatedData.unit || currentSupply.unit,
@@ -93,16 +96,13 @@ export function SuppliesProvider({ children }) {
           availability: updatedData.availability ?? updatedData.quantity ?? currentSupply.quantity
         };
 
-        // Update Firestore
-        const newSupplyRef = doc(db, "supplies", newId);
-        await setDoc(newSupplyRef, updatedSupplyData);
-        await deleteDoc(doc(db, "supplies", id));
+        // Update the existing document
+        await updateDoc(supplyRef, updatedSupplyData);
 
         // Update local state
-        setAllSupplies(prev => [
-          ...prev.filter(s => s.id !== id),
-          updatedSupplyData
-        ]);
+        setAllSupplies(prev => prev.map(s => 
+          s.docId === docId ? { ...updatedSupplyData, docId } : s
+        ));
 
         return newId;
       } else {
@@ -110,15 +110,15 @@ export function SuppliesProvider({ children }) {
         const updatedSupplyData = {
           ...currentSupply,
           ...updatedData,
-          dateUpdated: new Date()
+          dateUpdated: serverTimestamp()
         };
 
-        // Update Firestore
-        await updateDoc(doc(db, "supplies", id), updatedSupplyData);
+        // Update the existing document
+        await updateDoc(supplyRef, updatedSupplyData);
 
         // Update local state
         setAllSupplies(prev => prev.map(s => 
-          s.id === id ? updatedSupplyData : s
+          s.docId === docId ? { ...updatedSupplyData, docId } : s
         ));
 
         return id;
@@ -162,10 +162,10 @@ export function SuppliesProvider({ children }) {
     setIsLoading(true);
 
     // Fetch supplies
-    const suppliesQuery = query(collection(db, "supplies"), orderBy("id", "desc"));
+    const suppliesQuery = query(collection(db, "supplies"), orderBy("dateAdded", "desc"));
     const unsubscribeSupplies = onSnapshot(suppliesQuery, (snapshot) => {
       const suppliesData = snapshot.docs.map(doc => ({
-        id: doc.id,
+        docId: doc.id, // Store Firestore document ID
         ...doc.data()
       }));
       setAllSupplies(suppliesData);

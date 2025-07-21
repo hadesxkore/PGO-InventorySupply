@@ -338,10 +338,18 @@ export function SuppliesStock() {
         ...newSupply,
         image: imageUrl,
         quantity: parseInt(newSupply.quantity),
+        availability: parseInt(newSupply.quantity),
       });
 
       setDialogOpen(false);
-      setNewSupply({ name: "", quantity: "", unit: "", image: "", cluster: "", classification: "" });
+      setNewSupply({
+        name: "",
+        quantity: "",
+        unit: "",
+        image: "",
+        cluster: "",
+        classification: "",
+      });
       setSelectedImage(null);
       toast.success("Supply added successfully");
     } catch (error) {
@@ -355,6 +363,7 @@ export function SuppliesStock() {
   const handleEditClick = (supply) => {
     setEditSupply({
       id: supply.id,
+      docId: supply.docId, // Add docId
       name: supply.name,
       quantity: supply.quantity.toString(),
       unit: supply.unit,
@@ -387,16 +396,12 @@ export function SuppliesStock() {
         availability: parseInt(editSupply.quantity),
       };
 
-      const newId = await updateSupplyOptimized(editSupply.id, updatedData);
+      // Pass the docId for updating the correct document
+      await updateSupplyOptimized(editSupply.id, updatedData, editSupply.docId);
 
       setEditDialogOpen(false);
       setSelectedImage(null);
       toast.success("Supply updated successfully");
-
-      // If the ID changed (due to cluster change), update the selected supply
-      if (newId !== editSupply.id) {
-        setSelectedSupply(prev => prev?.id === editSupply.id ? { ...prev, id: newId } : prev);
-      }
     } catch (error) {
       console.error("Error updating supply:", error);
       toast.error("Failed to update supply");
@@ -442,7 +447,8 @@ export function SuppliesStock() {
           
           // Check if item already exists
           const existingItems = allSupplies.filter(supply => 
-            supply.name.toLowerCase() === trimmedName.toLowerCase()
+            supply.name.toLowerCase() === trimmedName.toLowerCase() &&
+            supply.classification?.toLowerCase() === (newSupply.classification || '').toLowerCase()
           );
 
           if (existingItems.length === 0) {
@@ -1321,7 +1327,7 @@ export function SuppliesStock() {
                     </TableRow>
                   ) : (
                     currentSupplies.map((supply) => (
-                      <TableRow key={supply.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                      <TableRow key={supply.docId} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
                         <TableCell className="font-mono">{supply.id}</TableCell>
                         <TableCell>
                           {supply.image ? (

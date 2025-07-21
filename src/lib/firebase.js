@@ -51,9 +51,28 @@ async function getNextIdForCluster(cluster) {
     return `${cluster}-0001`; // First item in this cluster
   }
 
-  const lastId = snapshot.docs[0].data().id;
-  const lastNumber = parseInt(lastId.split('-')[1]);
-  const nextNumber = lastNumber + 1;
+  // Get all existing IDs for this cluster to find gaps
+  const allClusterQuery = query(
+    suppliesRef,
+    where("id", ">=", `${cluster}-`),
+    where("id", "<=", `${cluster}-\uf8ff`),
+    orderBy("id", "asc")
+  );
+  
+  const allClusterDocs = await getDocs(allClusterQuery);
+  const existingNumbers = new Set();
+  
+  allClusterDocs.forEach(doc => {
+    const num = parseInt(doc.data().id.split('-')[1]);
+    existingNumbers.add(num);
+  });
+
+  // Find the first available number
+  let nextNumber = 1;
+  while (existingNumbers.has(nextNumber)) {
+    nextNumber++;
+  }
+
   return `${cluster}-${nextNumber.toString().padStart(4, '0')}`;
 }
 
@@ -61,11 +80,12 @@ async function getNextIdForCluster(cluster) {
 export const addSupply = async (supplyData) => {
   try {
     const newId = await getNextIdForCluster(supplyData.cluster);
-    const supplyRef = doc(db, "supplies", newId);
+    const suppliesRef = collection(db, "supplies");
+    const newDocRef = doc(suppliesRef); // Let Firestore generate a unique doc ID
     
-    await setDoc(supplyRef, {
+    await setDoc(newDocRef, {
       ...supplyData,
-      id: newId,
+      id: newId, // This is now just a field, not the document ID
       dateAdded: serverTimestamp(),
       dateUpdated: serverTimestamp()
     });
@@ -108,20 +128,23 @@ export const getSupplies = async (lastDoc = null, itemsPerPage = 20) => {
 
 export const updateSupply = async (id, updatedData) => {
   try {
-    const supplyRef = doc(db, "supplies", id);
-    const supplyDoc = await getDoc(supplyRef);
-    if (!supplyDoc.exists()) {
+    // Find the document with the matching supply ID
+    const suppliesRef = collection(db, "supplies");
+    const q = query(suppliesRef, where("id", "==", id));
+    const querySnapshot = await getDocs(q);
+    
+    if (querySnapshot.empty) {
       throw new Error("Supply not found!");
     }
-    const currentSupply = supplyDoc.data();
+
+    const docId = querySnapshot.docs[0].id;
+    const currentSupply = querySnapshot.docs[0].data();
+    const supplyRef = doc(db, "supplies", docId);
 
     // If cluster is being changed, we need to update the ID
     if (updatedData.cluster && currentSupply.cluster !== updatedData.cluster) {
       // Get new ID for the new cluster
       const newId = await getNextIdForCluster(updatedData.cluster);
-      
-      // Create new document with new ID
-      const newSupplyRef = doc(db, "supplies", newId);
       
       // Prepare the updated data, ensuring no undefined values
       const updatedSupplyData = {
@@ -146,29 +169,25 @@ export const updateSupply = async (id, updatedData) => {
         }
       });
       
-      // Create new document with new ID
-      await setDoc(newSupplyRef, updatedSupplyData);
-
-      // Delete old document
-      await deleteDoc(supplyRef);
-
+      // Update the existing document with new data
+      await updateDoc(supplyRef, updatedSupplyData);
       return newId; // Return new ID for UI update
-    } else {
-      // If cluster isn't changing, just update normally
-      // Remove any undefined values from updatedData
-      const cleanUpdatedData = { ...updatedData };
-      Object.keys(cleanUpdatedData).forEach(key => {
-        if (cleanUpdatedData[key] === undefined || cleanUpdatedData[key] === null) {
-          delete cleanUpdatedData[key];
-        }
-      });
-
-      await updateDoc(supplyRef, {
-        ...cleanUpdatedData,
-        dateUpdated: serverTimestamp()
-      });
-      return id;
     }
+
+    // If cluster isn't changing, just update normally
+    // Remove any undefined values from updatedData
+    const cleanUpdatedData = { ...updatedData };
+    Object.keys(cleanUpdatedData).forEach(key => {
+      if (cleanUpdatedData[key] === undefined || cleanUpdatedData[key] === null) {
+        delete cleanUpdatedData[key];
+      }
+    });
+
+    await updateDoc(supplyRef, {
+      ...cleanUpdatedData,
+      dateUpdated: serverTimestamp()
+    });
+    return id;
   } catch (error) {
     console.error("Error updating supply:", error);
     throw error;
@@ -177,7 +196,17 @@ export const updateSupply = async (id, updatedData) => {
 
 export const deleteSupply = async (supplyId) => {
   try {
-    const supplyRef = doc(db, "supplies", supplyId);
+    // Find the document with the matching supply ID
+    const suppliesRef = collection(db, "supplies");
+    const q = query(suppliesRef, where("id", "==", supplyId));
+    const querySnapshot = await getDocs(q);
+    
+    if (querySnapshot.empty) {
+      throw new Error("Supply not found!");
+    }
+
+    const docId = querySnapshot.docs[0].id;
+    const supplyRef = doc(db, "supplies", docId);
     await deleteDoc(supplyRef);
   } catch (error) {
     console.error("Error deleting supply:", error);
