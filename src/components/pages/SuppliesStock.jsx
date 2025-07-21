@@ -62,7 +62,7 @@ import {
   addClassification
 } from "../../lib/firebase";
 import { collection, query, orderBy, where, addDoc, getDocs, onSnapshot, limit, startAfter } from "firebase/firestore";
-import { Search, Plus, Pencil, Trash2, Package, Boxes, AlertTriangle, XCircle, Calendar, ArrowUpDown, FileText, Check, ChevronDown, ChevronUp } from "lucide-react";
+import { Search, Plus, Pencil, Trash2, Package, Boxes, AlertTriangle, XCircle, Calendar, ArrowUpDown, FileText, Check, ChevronDown, ChevronUp, X } from "lucide-react";
 import { format } from "date-fns";
 import { Calendar as CalendarComponent } from "../ui/calendar";
 import { Skeleton } from "../ui/skeleton";
@@ -85,6 +85,8 @@ import {
 } from "../ui/dropdown-menu";
 import { Filter } from "lucide-react";
 import { useSupplies } from "../../lib/SuppliesContext";
+import { Label } from "../ui/label";
+import { Progress } from "../ui/progress";
 
 export function SuppliesStock() {
   const { 
@@ -144,6 +146,47 @@ export function SuppliesStock() {
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   
+  const [imageUploadStatus, setImageUploadStatus] = useState({ loading: false, progress: 0, fileSize: '' });
+
+  const formatFileSize = (bytes) => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
+  const handleImageUpload = async (e, isEdit = false) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setImageUploadStatus({
+      loading: true,
+      progress: 0,
+      fileSize: formatFileSize(file.size)
+    });
+
+    try {
+      const imageUrl = await uploadImage(file, (progress) => {
+        setImageUploadStatus(prev => ({
+          ...prev,
+          progress: Math.round(progress)
+        }));
+      });
+
+      if (isEdit) {
+        setEditSupply({ ...editSupply, image: imageUrl });
+      } else {
+        setNewSupply({ ...newSupply, image: imageUrl });
+      }
+    } catch (error) {
+      toast.error("Failed to upload image");
+      console.error("Image upload failed:", error);
+    } finally {
+      setImageUploadStatus({ loading: false, progress: 0, fileSize: '' });
+    }
+  };
+
   // Filter units based on search query
   const filteredUnits = units.filter(unit =>
     unit.name.toLowerCase().includes(unitSearchQuery.toLowerCase())
@@ -277,13 +320,6 @@ export function SuppliesStock() {
         </Button>
       </div>
     );
-  };
-
-  const handleImageChange = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      setSelectedImage(file);
-    }
   };
 
   const handleAddUnit = async (e) => {
@@ -572,8 +608,34 @@ export function SuppliesStock() {
                               type="file"
                               accept="image/*"
                               className="hidden"
-                              onChange={handleImageChange}
+                              onChange={(e) => handleImageUpload(e, false)}
                             />
+                            {imageUploadStatus.loading && (
+                              <div className="space-y-2 mt-4">
+                                <div className="flex items-center justify-between text-sm text-muted-foreground">
+                                  <span>Uploading... {imageUploadStatus.progress}%</span>
+                                  <span>{imageUploadStatus.fileSize}</span>
+                                </div>
+                                <Progress value={imageUploadStatus.progress} className="h-1" />
+                              </div>
+                            )}
+                            {newSupply.image && (
+                              <div className="relative w-20 h-20 mt-4">
+                                <img
+                                  src={newSupply.image}
+                                  alt="Supply Preview"
+                                  className="w-full h-full object-cover rounded-md"
+                                />
+                                <Button
+                                  variant="destructive"
+                                  size="icon"
+                                  className="absolute -top-2 -right-2 h-6 w-6"
+                                  onClick={() => setNewSupply(prev => ({ ...prev, image: '' }))}
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            )}
                           </label>
                         )}
                       </div>
@@ -1515,8 +1577,34 @@ export function SuppliesStock() {
                         type="file"
                         accept="image/*"
                         className="hidden"
-                        onChange={handleImageChange}
+                        onChange={(e) => handleImageUpload(e, true)}
                       />
+                      {imageUploadStatus.loading && (
+                        <div className="space-y-2 mt-4">
+                          <div className="flex items-center justify-between text-sm text-muted-foreground">
+                            <span>Uploading... {imageUploadStatus.progress}%</span>
+                            <span>{imageUploadStatus.fileSize}</span>
+                          </div>
+                          <Progress value={imageUploadStatus.progress} className="h-1" />
+                        </div>
+                      )}
+                      {editSupply.image && (
+                        <div className="relative w-20 h-20 mt-4">
+                          <img
+                            src={editSupply.image}
+                            alt="Supply Preview"
+                            className="w-full h-full object-cover rounded-md"
+                          />
+                          <Button
+                            variant="destructive"
+                            size="icon"
+                            className="absolute -top-2 -right-2 h-6 w-6"
+                            onClick={() => setEditSupply(prev => ({ ...prev, image: '' }))}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      )}
                     </label>
                   )}
                 </div>
