@@ -326,6 +326,7 @@ export function SuppliesStock() {
   const handleEditClick = (supply) => {
     setEditSupply({
       id: supply.id,
+      docId: supply.docId, // Add docId
       name: supply.name,
       quantity: supply.quantity.toString(),
       unit: supply.unit,
@@ -358,16 +359,12 @@ export function SuppliesStock() {
         availability: parseInt(editSupply.quantity),
       };
 
-      const newId = await updateSupplyOptimized(editSupply.id, updatedData);
+      // Pass the docId for updating the correct document
+      await updateSupplyOptimized(editSupply.id, updatedData, editSupply.docId);
 
       setEditDialogOpen(false);
       setSelectedImage(null);
       toast.success("Supply updated successfully");
-
-      // If the ID changed (due to cluster change), update the selected supply
-      if (newId !== editSupply.id) {
-        setSelectedSupply(prev => prev?.id === editSupply.id ? { ...prev, id: newId } : prev);
-      }
     } catch (error) {
       console.error("Error updating supply:", error);
       toast.error("Failed to update supply");
