@@ -29,7 +29,7 @@ import {
 import { DatePickerWithRange } from "../ui/date-range-picker";
 import { format } from "date-fns";
 import { clusters } from "../../lib/firebase";
-import { FileText, FileIcon, Download, Calendar, ArrowUpDown, Filter, Search, Package, ArrowUpRight } from "lucide-react";
+import { FileText, FileIcon, Download, Calendar, ArrowUpDown, Filter, Search, Package, ArrowUpRight, ChevronUp, ChevronDown } from "lucide-react";
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -40,6 +40,7 @@ export function Reports() {
   const { reportsData, isLoading, dateRange, setDateRange } = useReports();
   const [reportType, setReportType] = useState("supplies");
   const [currentPage, setCurrentPage] = useState(1);
+  const [sortField, setSortField] = useState('name');
   const [sortOrder, setSortOrder] = useState('asc');
   const [selectedCluster, setSelectedCluster] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
@@ -50,6 +51,7 @@ export function Reports() {
   console.log('Reports Component State:', { 
     reportType, 
     currentPage, 
+    sortField, 
     sortOrder, 
     selectedCluster, 
     searchTerm,
@@ -91,22 +93,39 @@ export function Reports() {
   const getSortedAndPaginatedData = () => {
     const filteredData = getFilteredData();
     
-    // Sort based on name/supplyName depending on report type
+    // Enhanced sorting based on multiple fields
     const sortedData = [...filteredData].sort((a, b) => {
-      let valueA = '';
-      let valueB = '';
+      let compareA, compareB;
       
-      if (reportType === 'supplies') {
-        valueA = (a.Name || '').toLowerCase();
-        valueB = (b.Name || '').toLowerCase();
-      } else {
-        valueA = (a['Supply Name'] || '').toLowerCase();
-        valueB = (b['Supply Name'] || '').toLowerCase();
+      switch (sortField) {
+        case 'id':
+          compareA = a.ID?.toLowerCase() || '';
+          compareB = b.ID?.toLowerCase() || '';
+          break;
+        case 'name':
+          compareA = (reportType === 'supplies' ? a.Name : a['Supply Name'])?.toLowerCase() || '';
+          compareB = (reportType === 'supplies' ? b.Name : b['Supply Name'])?.toLowerCase() || '';
+          break;
+        case 'quantity':
+          compareA = parseInt(a.Quantity) || 0;
+          compareB = parseInt(b.Quantity) || 0;
+          break;
+        case 'classification':
+          compareA = a.Classification?.toLowerCase() || '';
+          compareB = b.Classification?.toLowerCase() || '';
+          break;
+        case 'date':
+          compareA = new Date(a['Date Added'] || 0).getTime();
+          compareB = new Date(b['Date Added'] || 0).getTime();
+          break;
+        default:
+          compareA = (a[sortField] || '').toLowerCase();
+          compareB = (b[sortField] || '').toLowerCase();
       }
-      
-      return sortOrder === 'asc' 
-        ? valueA.localeCompare(valueB)
-        : valueB.localeCompare(valueA);
+
+      return sortOrder === 'asc' ? 
+        (compareA > compareB ? 1 : -1) : 
+        (compareA < compareB ? 1 : -1);
     });
 
     // Calculate pagination
@@ -127,10 +146,24 @@ export function Reports() {
   // Reset pagination when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [reportType, dateRange, searchTerm, selectedCluster, sortOrder]);
+  }, [reportType, dateRange, searchTerm, selectedCluster, sortField, sortOrder]);
 
-  const toggleSort = () => {
-    setSortOrder(current => current === 'asc' ? 'desc' : 'asc');
+  // Function to handle sort changes
+  const handleSort = (field) => {
+    if (sortField === field) {
+      setSortOrder(current => current === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortOrder('asc');
+    }
+  };
+
+  // Helper function to render sort indicator
+  const renderSortIndicator = (field) => {
+    if (sortField !== field) return null;
+    return sortOrder === 'asc' ? 
+      <ChevronUp className="w-4 h-4" /> : 
+      <ChevronDown className="w-4 h-4" />;
   };
 
   // Generate Excel report
@@ -421,7 +454,7 @@ export function Reports() {
               <Button
                 variant="outline"
                 size="icon"
-                onClick={toggleSort}
+                onClick={() => handleSort('id')}
                 className={cn(
                   "h-10 w-10",
                   sortOrder === 'desc' && "bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800"
@@ -429,11 +462,142 @@ export function Reports() {
               >
                 <ArrowUpDown className="h-4 w-4" />
               </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="gap-2 min-w-[140px] justify-between"
+                  >
+                    <div className="flex items-center gap-2">
+                      <ArrowUpDown className="h-4 w-4" />
+                      Sort By
+                    </div>
+                    <ChevronDown className="h-4 w-4 opacity-50" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-[200px]">
+                  <DropdownMenuItem 
+                    className="text-sm text-muted-foreground"
+                    disabled
+                  >
+                    Sort by ID
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setSortField('id');
+                      setSortOrder('asc');
+                    }}
+                  >
+                    <div className="flex items-center">
+                      <ChevronUp className="mr-2 h-3.5 w-3.5 text-muted-foreground/70" />
+                      <span>Lowest to Highest</span>
+                    </div>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setSortField('id');
+                      setSortOrder('desc');
+                    }}
+                  >
+                    <div className="flex items-center">
+                      <ChevronDown className="mr-2 h-3.5 w-3.5 text-muted-foreground/70" />
+                      <span>Highest to Lowest</span>
+                    </div>
+                  </DropdownMenuItem>
+
+                  <DropdownMenuItem 
+                    className="text-sm text-muted-foreground mt-2"
+                    disabled
+                  >
+                    Sort by Name
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setSortField('name');
+                      setSortOrder('asc');
+                    }}
+                  >
+                    <div className="flex items-center">
+                      <ChevronUp className="mr-2 h-3.5 w-3.5 text-muted-foreground/70" />
+                      <span>A to Z</span>
+                    </div>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setSortField('name');
+                      setSortOrder('desc');
+                    }}
+                  >
+                    <div className="flex items-center">
+                      <ChevronDown className="mr-2 h-3.5 w-3.5 text-muted-foreground/70" />
+                      <span>Z to A</span>
+                    </div>
+                  </DropdownMenuItem>
+
+                  <DropdownMenuItem 
+                    className="text-sm text-muted-foreground mt-2"
+                    disabled
+                  >
+                    Sort by Quantity
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setSortField('quantity');
+                      setSortOrder('asc');
+                    }}
+                  >
+                    <div className="flex items-center">
+                      <ChevronUp className="mr-2 h-3.5 w-3.5 text-muted-foreground/70" />
+                      <span>Lowest to Highest</span>
+                    </div>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setSortField('quantity');
+                      setSortOrder('desc');
+                    }}
+                  >
+                    <div className="flex items-center">
+                      <ChevronDown className="mr-2 h-3.5 w-3.5 text-muted-foreground/70" />
+                      <span>Highest to Lowest</span>
+                    </div>
+                  </DropdownMenuItem>
+
+                  <DropdownMenuItem 
+                    className="text-sm text-muted-foreground mt-2"
+                    disabled
+                  >
+                    Sort by Date Added
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setSortField('date');
+                      setSortOrder('asc');
+                    }}
+                  >
+                    <div className="flex items-center">
+                      <ChevronUp className="mr-2 h-3.5 w-3.5 text-muted-foreground/70" />
+                      <span>Oldest First</span>
+                    </div>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setSortField('date');
+                      setSortOrder('desc');
+                    }}
+                  >
+                    <div className="flex items-center">
+                      <ChevronDown className="mr-2 h-3.5 w-3.5 text-muted-foreground/70" />
+                      <span>Newest First</span>
+                    </div>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <div className="text-sm text-gray-500 dark:text-gray-400">
                 {(() => {
                   const { totalItems, data } = getSortedAndPaginatedData();
                   const startIndex = (currentPage - 1) * itemsPerPage;
-                  return `Showing ${startIndex + 1} to ${startIndex + data.length} of ${totalItems} items ${selectedCluster !== 'all' ? `(Filtered by ${selectedCluster})` : ''} ${sortOrder === 'asc' ? '(A-Z)' : '(Z-A)'}`;
+                  return `Showing ${startIndex + 1} to ${startIndex + data.length} of ${totalItems} items ${selectedCluster !== 'all' ? `(Filtered by ${selectedCluster})` : ''} (Sorted by ${sortField} ${sortOrder === 'asc' ? '↑' : '↓'})`;
                 })()}
               </div>
             </div>
