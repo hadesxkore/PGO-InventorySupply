@@ -167,7 +167,7 @@ export function DeliveryPage() {
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const suppliesData = [];
       snapshot.forEach((doc) => {
-        suppliesData.push({ id: doc.id, ...doc.data() });
+        suppliesData.push({ id: doc.id, docId: doc.id, ...doc.data() });
       });
       setSupplies(suppliesData);
     });
@@ -316,12 +316,12 @@ export function DeliveryPage() {
     try {
       // Start a Firestore transaction
       await runTransaction(db, async (transaction) => {
-        // Get the supply document
+        // Get the supply document using the correct document ID
         const supplyRef = doc(db, "supplies", newDelivery.supplyId);
         const supplyDoc = await transaction.get(supplyRef);
 
         if (!supplyDoc.exists()) {
-          throw new Error("Supply not found");
+          throw new Error("Supply not found. Please refresh and try again.");
         }
 
         // Get all deliveries to determine the next ID
@@ -338,15 +338,18 @@ export function DeliveryPage() {
         }
         const newDeliveryId = `DLV-${String(nextNumber).padStart(4, '0')}`;
 
-        // Calculate new quantity
+        // Calculate new quantities
         const currentQuantity = supplyDoc.data().quantity || 0;
+        const currentAvailability = supplyDoc.data().availability || 0;
         const deliveryQuantity = parseInt(newDelivery.quantity);
         const newQuantity = currentQuantity + deliveryQuantity;
+        const newAvailability = currentAvailability + deliveryQuantity; // Add to current availability instead of setting equal to total
 
         // Update supply quantity and classification
         const updateData = {
           quantity: newQuantity,
-          availability: newQuantity
+          availability: newAvailability, // Use the new availability calculation
+          dateUpdated: serverTimestamp()
         };
 
         // Only update classification if it's provided and different from current
@@ -354,15 +357,6 @@ export function DeliveryPage() {
             newDelivery.classification !== "N/A" && 
             newDelivery.classification !== supplyDoc.data().classification) {
           updateData.classification = newDelivery.classification;
-          
-          // If this is a new classification, add it to classifications collection
-          if (!classifications.some(c => c.name === newDelivery.classification)) {
-            const classificationRef = doc(collection(db, "classifications"));
-            transaction.set(classificationRef, {
-              name: newDelivery.classification,
-              createdAt: serverTimestamp()
-            });
-          }
         }
 
         // Update the supply document
@@ -374,7 +368,7 @@ export function DeliveryPage() {
           id: newDeliveryId,
           supplyId: newDelivery.supplyId,
           supplyName: newDelivery.supplyName,
-          classification: newDelivery.classification || "N/A",
+          classification: newDelivery.classification || supplyDoc.data().classification || "N/A",
           quantity: deliveryQuantity,
           deliveredBy: newDelivery.deliveredBy.trim(),
           notes: newDelivery.notes.trim(),
@@ -396,7 +390,7 @@ export function DeliveryPage() {
       toast.success("Delivery added successfully");
     } catch (error) {
       console.error("Error adding delivery:", error);
-      toast.error("Failed to add delivery: " + error.message);
+      toast.error(error.message || "Failed to add delivery");
     } finally {
       setLoading(false);
     }
@@ -468,13 +462,29 @@ export function DeliveryPage() {
         // Get the supply document to update quantity
         const supplyRef = doc(db, "supplies", selectedDeliveryForDelete.supplyId);
         const supplyDoc = await transaction.get(supplyRef);
-        const currentQuantity = supplyDoc.data().quantity;
-        const newQuantity = currentQuantity - parseInt(selectedDeliveryForDelete.quantity);
+        
+        if (!supplyDoc.exists()) {
+          throw new Error("Supply not found. The supply might have been deleted.");
+        }
 
-        // Update supply quantity
+        const currentQuantity = supplyDoc.data().quantity;
+        const currentAvailability = supplyDoc.data().availability ?? supplyDoc.data().quantity;
+        const deliveryQuantity = parseInt(selectedDeliveryForDelete.quantity);
+
+        // Calculate new quantities
+        const newQuantity = currentQuantity - deliveryQuantity;
+        const newAvailability = currentAvailability - deliveryQuantity;
+
+        // Ensure quantities don't go negative
+        if (newQuantity < 0 || newAvailability < 0) {
+          throw new Error("Cannot delete delivery as it would result in negative stock. Please check other transactions first.");
+        }
+
+        // Update supply quantity and availability
         transaction.update(supplyRef, {
           quantity: newQuantity,
-          updatedAt: Timestamp.now()
+          availability: newAvailability,
+          updatedAt: serverTimestamp()
         });
 
         // Delete delivery document
@@ -546,14 +556,17 @@ export function DeliveryPage() {
                                     onSelect={() => {
                                       setNewDelivery({
                                         ...newDelivery,
-                                        supplyId: supply.id,
+                                        supplyId: supply.docId, // Use docId instead of id
                                         supplyName: supply.name,
                                         classification: supply.classification || "" // Get classification from supply
                                       });
                                       setOpen(false);
                                     }}
                                   >
-                                    {supply.name}
+                                    <div className="flex items-center gap-2">
+                                      <span>{supply.name}</span>
+                                      <span className="text-sm text-gray-500">({supply.id})</span>
+                                    </div>
                                   </CommandItem>
                                 ))}
                               </CommandGroup>
@@ -1023,14 +1036,17 @@ export function DeliveryPage() {
                                 onSelect={() => {
                                   setEditDelivery({
                                     ...editDelivery,
-                                    supplyId: supply.id,
+                                    supplyId: supply.docId, // Use docId instead of id
                                     supplyName: supply.name,
                                     classification: supply.classification || ""
                                   });
                                   setEditOpen(false);
                                 }}
                               >
-                                {supply.name}
+                                <div className="flex items-center gap-2">
+                                  <span>{supply.name}</span>
+                                  <span className="text-sm text-gray-500">({supply.id})</span>
+                                </div>
                               </CommandItem>
                             ))}
                           </CommandGroup>

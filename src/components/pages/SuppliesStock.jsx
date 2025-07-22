@@ -425,11 +425,19 @@ export function SuppliesStock() {
         imageUrl = await uploadImage(selectedImage);
       }
 
+      // Calculate the quantity difference
+      const currentSupply = allSupplies.find(s => s.docId === editSupply.docId);
+      const quantityDifference = parseInt(editSupply.quantity) - currentSupply.quantity;
+      
+      // Calculate new availability by adding the quantity difference to current availability
+      const currentAvailability = currentSupply.availability ?? currentSupply.quantity;
+      const newAvailability = currentAvailability + quantityDifference;
+
       const updatedData = {
         ...editSupply,
         image: imageUrl,
         quantity: parseInt(editSupply.quantity),
-        availability: parseInt(editSupply.quantity),
+        availability: newAvailability, // Update availability based on the difference
       };
 
       // Pass the docId for updating the correct document
