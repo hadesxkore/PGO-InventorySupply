@@ -46,10 +46,16 @@ import {
   limit
 } from "firebase/firestore";
 import { db } from "../../lib/firebase";
-import { Search, Plus, Package, Share2, History, Users, ArrowRight, Edit, Filter, Calendar, ArrowUpDown, Check } from "lucide-react";
+import { Search, Plus, Package, Share2, History, Users, ArrowRight, Edit, Filter, Calendar, ArrowUpDown, Check, ChevronUp, ChevronDown } from "lucide-react";
 import { format } from "date-fns";
 import { Calendar as CalendarComponent } from "../ui/calendar";
 import { useReleases } from "../../lib/ReleaseContext";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "../ui/dropdown-menu";
 
 export function ReleaseSupply() {
   const { releases, supplies, stats, isLoading: isContextLoading } = useReleases();
@@ -64,6 +70,7 @@ export function ReleaseSupply() {
   const [selectedDate, setSelectedDate] = useState(null);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [editingRelease, setEditingRelease] = useState(null);
+  const [sortField, setSortField] = useState('supplyName');
   const [sortOrder, setSortOrder] = useState('asc');
 
   const [newRelease, setNewRelease] = useState({
@@ -83,6 +90,26 @@ export function ReleaseSupply() {
   useEffect(() => {
     setFilteredReleases(releases);
   }, [releases]);
+
+  // Multi-field sort handler
+  const handleSort = (field) => {
+    if (sortField === field) {
+      setSortOrder(current => current === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortOrder('asc');
+    }
+  };
+
+  // Render sort indicator
+  const renderSortIndicator = (field) => {
+    if (sortField !== field) return null;
+    return sortOrder === 'asc' ? (
+      <ChevronUp className="w-4 h-4" />
+    ) : (
+      <ChevronDown className="w-4 h-4" />
+    );
+  };
 
   // Modified search effect to include date filtering
   useEffect(() => {
@@ -110,18 +137,52 @@ export function ReleaseSupply() {
       });
     }
 
-    // Sort the filtered releases by supply name
+    // Multi-field sort logic
     filtered = [...filtered].sort((a, b) => {
-      const nameA = (a.supplyName || '').charAt(0).toLowerCase();
-      const nameB = (b.supplyName || '').charAt(0).toLowerCase();
-      return sortOrder === 'asc' 
-        ? nameA.localeCompare(nameB)
-        : nameB.localeCompare(nameA);
+      let compareA, compareB;
+      switch (sortField) {
+        case 'id':
+          compareA = a.id;
+          compareB = b.id;
+          break;
+        case 'supplyName':
+          compareA = (a.supplyName || '').toLowerCase();
+          compareB = (b.supplyName || '').toLowerCase();
+          break;
+        case 'quantity':
+          compareA = parseInt(a.quantity);
+          compareB = parseInt(b.quantity);
+          break;
+        case 'receivedBy':
+          compareA = (a.receivedBy || '').toLowerCase();
+          compareB = (b.receivedBy || '').toLowerCase();
+          break;
+        case 'department':
+          compareA = (a.department || '').toLowerCase();
+          compareB = (b.department || '').toLowerCase();
+          break;
+        case 'purpose':
+          compareA = (a.purpose || '').toLowerCase();
+          compareB = (b.purpose || '').toLowerCase();
+          break;
+        case 'createdAt':
+          compareA = a.createdAt?.toDate().getTime() || 0;
+          compareB = b.createdAt?.toDate().getTime() || 0;
+          break;
+        default:
+          compareA = a[sortField];
+          compareB = b[sortField];
+      }
+      if (sortOrder === 'asc') {
+        return compareA > compareB ? 1 : -1;
+      } else {
+        return compareA < compareB ? 1 : -1;
+      }
     });
 
     console.log('Filtered results:', filtered.length);
     setFilteredReleases(filtered);
-  }, [searchTerm, releases, selectedDate, sortOrder]);
+  }, [searchTerm, releases, selectedDate, sortField, sortOrder]);
 
   // Add toggle sort function
   const toggleSort = () => {
@@ -605,6 +666,115 @@ export function ReleaseSupply() {
               />
             </div>
             <div className="flex items-center gap-4">
+              {/* Sort By Dropdown */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="gap-2 min-w-[140px] justify-between"
+                  >
+                    <div className="flex items-center gap-2">
+                      <ArrowUpDown className="h-4 w-4" />
+                      Sort By
+                    </div>
+                    <ChevronDown className="h-4 w-4 opacity-50" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-[220px]">
+                  <DropdownMenuItem disabled className="font-medium text-sm text-muted-foreground px-2 py-1.5">Sort by ID</DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => { setSortField('id'); setSortOrder('asc'); }}
+                    className={cn("gap-2", sortField === 'id' && sortOrder === 'asc' && "bg-accent")}
+                  >
+                    <ChevronUp className="h-4 w-4" /> Lowest to Highest
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => { setSortField('id'); setSortOrder('desc'); }}
+                    className={cn("gap-2", sortField === 'id' && sortOrder === 'desc' && "bg-accent")}
+                  >
+                    <ChevronDown className="h-4 w-4" /> Highest to Lowest
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled className="font-medium text-sm text-muted-foreground px-2 py-1.5 mt-2">Sort by Supply Name</DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => { setSortField('supplyName'); setSortOrder('asc'); }}
+                    className={cn("gap-2", sortField === 'supplyName' && sortOrder === 'asc' && "bg-accent")}
+                  >
+                    <ChevronUp className="h-4 w-4" /> A to Z
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => { setSortField('supplyName'); setSortOrder('desc'); }}
+                    className={cn("gap-2", sortField === 'supplyName' && sortOrder === 'desc' && "bg-accent")}
+                  >
+                    <ChevronDown className="h-4 w-4" /> Z to A
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled className="font-medium text-sm text-muted-foreground px-2 py-1.5 mt-2">Sort by Quantity</DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => { setSortField('quantity'); setSortOrder('asc'); }}
+                    className={cn("gap-2", sortField === 'quantity' && sortOrder === 'asc' && "bg-accent")}
+                  >
+                    <ChevronUp className="h-4 w-4" /> Lowest to Highest
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => { setSortField('quantity'); setSortOrder('desc'); }}
+                    className={cn("gap-2", sortField === 'quantity' && sortOrder === 'desc' && "bg-accent")}
+                  >
+                    <ChevronDown className="h-4 w-4" /> Highest to Lowest
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled className="font-medium text-sm text-muted-foreground px-2 py-1.5 mt-2">Sort by Received By</DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => { setSortField('receivedBy'); setSortOrder('asc'); }}
+                    className={cn("gap-2", sortField === 'receivedBy' && sortOrder === 'asc' && "bg-accent")}
+                  >
+                    <ChevronUp className="h-4 w-4" /> A to Z
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => { setSortField('receivedBy'); setSortOrder('desc'); }}
+                    className={cn("gap-2", sortField === 'receivedBy' && sortOrder === 'desc' && "bg-accent")}
+                  >
+                    <ChevronDown className="h-4 w-4" /> Z to A
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled className="font-medium text-sm text-muted-foreground px-2 py-1.5 mt-2">Sort by Department</DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => { setSortField('department'); setSortOrder('asc'); }}
+                    className={cn("gap-2", sortField === 'department' && sortOrder === 'asc' && "bg-accent")}
+                  >
+                    <ChevronUp className="h-4 w-4" /> A to Z
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => { setSortField('department'); setSortOrder('desc'); }}
+                    className={cn("gap-2", sortField === 'department' && sortOrder === 'desc' && "bg-accent")}
+                  >
+                    <ChevronDown className="h-4 w-4" /> Z to A
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled className="font-medium text-sm text-muted-foreground px-2 py-1.5 mt-2">Sort by Purpose</DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => { setSortField('purpose'); setSortOrder('asc'); }}
+                    className={cn("gap-2", sortField === 'purpose' && sortOrder === 'asc' && "bg-accent")}
+                  >
+                    <ChevronUp className="h-4 w-4" /> A to Z
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => { setSortField('purpose'); setSortOrder('desc'); }}
+                    className={cn("gap-2", sortField === 'purpose' && sortOrder === 'desc' && "bg-accent")}
+                  >
+                    <ChevronDown className="h-4 w-4" /> Z to A
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled className="font-medium text-sm text-muted-foreground px-2 py-1.5 mt-2">Sort by Date Released</DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => { setSortField('createdAt'); setSortOrder('asc'); }}
+                    className={cn("gap-2", sortField === 'createdAt' && sortOrder === 'asc' && "bg-accent")}
+                  >
+                    <ChevronUp className="h-4 w-4" /> Oldest First
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => { setSortField('createdAt'); setSortOrder('desc'); }}
+                    className={cn("gap-2", sortField === 'createdAt' && sortOrder === 'desc' && "bg-accent")}
+                  >
+                    <ChevronDown className="h-4 w-4" /> Newest First
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              {/* End Sort By Dropdown */}
               <Button
                 variant="outline"
                 size="icon"
@@ -664,13 +834,27 @@ export function ReleaseSupply() {
             <Table>
               <TableHeader>
                 <TableRow className="bg-gray-50 dark:bg-gray-800">
-                  <TableHead className="py-3 text-sm font-semibold">ID</TableHead>
-                  <TableHead className="py-3 text-sm font-semibold">Supply Name</TableHead>
-                  <TableHead className="py-3 text-sm font-semibold">Quantity</TableHead>
-                  <TableHead className="py-3 text-sm font-semibold">Received By</TableHead>
-                  <TableHead className="py-3 text-sm font-semibold">Department</TableHead>
-                  <TableHead className="py-3 text-sm font-semibold">Purpose</TableHead>
-                  <TableHead className="py-3 text-sm font-semibold">Date Released</TableHead>
+                  <TableHead className="py-3 text-sm font-semibold cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700" onClick={() => handleSort('id')}>
+                    <div className="flex items-center gap-1">ID {renderSortIndicator('id')}</div>
+                  </TableHead>
+                  <TableHead className="py-3 text-sm font-semibold cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700" onClick={() => handleSort('supplyName')}>
+                    <div className="flex items-center gap-1">Supply Name {renderSortIndicator('supplyName')}</div>
+                  </TableHead>
+                  <TableHead className="py-3 text-sm font-semibold cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700" onClick={() => handleSort('quantity')}>
+                    <div className="flex items-center gap-1">Quantity {renderSortIndicator('quantity')}</div>
+                  </TableHead>
+                  <TableHead className="py-3 text-sm font-semibold cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700" onClick={() => handleSort('receivedBy')}>
+                    <div className="flex items-center gap-1">Received By {renderSortIndicator('receivedBy')}</div>
+                  </TableHead>
+                  <TableHead className="py-3 text-sm font-semibold cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700" onClick={() => handleSort('department')}>
+                    <div className="flex items-center gap-1">Department {renderSortIndicator('department')}</div>
+                  </TableHead>
+                  <TableHead className="py-3 text-sm font-semibold cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700" onClick={() => handleSort('purpose')}>
+                    <div className="flex items-center gap-1">Purpose {renderSortIndicator('purpose')}</div>
+                  </TableHead>
+                  <TableHead className="py-3 text-sm font-semibold cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700" onClick={() => handleSort('createdAt')}>
+                    <div className="flex items-center gap-1">Date Released {renderSortIndicator('createdAt')}</div>
+                  </TableHead>
                   <TableHead className="py-3 text-sm font-semibold">Actions</TableHead>
                 </TableRow>
               </TableHeader>
