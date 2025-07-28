@@ -58,7 +58,7 @@ export function ReleaseSupply() {
   const [searchTerm, setSearchTerm] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const [selectedSupply, setSelectedSupply] = useState(null);
+  const [selectedSupplies, setSelectedSupplies] = useState([]);
   const [open, setOpen] = useState(false);
   const [commandInputValue, setCommandInputValue] = useState("");
   const [selectedDate, setSelectedDate] = useState(null);
@@ -67,10 +67,6 @@ export function ReleaseSupply() {
   const [sortOrder, setSortOrder] = useState('asc');
 
   const [newRelease, setNewRelease] = useState({
-    supplyId: "",
-    supplyDocId: "", // Add docId field
-    supplyName: "",
-    quantity: "",
     receivedBy: "",
     department: "",
     purpose: ""
@@ -136,76 +132,101 @@ export function ReleaseSupply() {
     e.preventDefault();
     setLoading(true);
 
+    if (selectedSupplies.length === 0) {
+      toast.error("Please select at least one supply");
+      setLoading(false);
+      return;
+    }
+
     try {
       // Start a Firestore transaction
       await runTransaction(db, async (transaction) => {
-        // Get the supply document using docId
-        const supplyRef = doc(db, "supplies", newRelease.supplyDocId);
-        const supplyDoc = await transaction.get(supplyRef);
-
-        if (!supplyDoc.exists()) {
-          throw new Error("Supply not found!");
-        }
-
-        // Check if there's enough availability
-        const currentQuantity = supplyDoc.data().quantity || 0;
-        const currentAvailability = supplyDoc.data().availability ?? currentQuantity;
-        const releaseQuantity = parseInt(newRelease.quantity);
-
-        if (releaseQuantity > currentAvailability) {
-          throw new Error("Not enough quantity available!");
-        }
-
-        const newAvailability = currentAvailability - releaseQuantity;
-
-        // Get all releases to determine the next ID
+        // First, get the next release ID with RLS prefix
         const releasesRef = collection(db, "releases");
-        const releasesQuery = query(releasesRef, orderBy("id", "desc"), limit(1));
-        const releasesSnapshot = await getDocs(releasesQuery);
-        
-        // Generate the next release ID
+        const releasesSnapshot = await getDocs(query(releasesRef, orderBy("id", "desc"), limit(1)));
         let nextNumber = 1;
+        
         if (!releasesSnapshot.empty) {
-          const lastRelease = releasesSnapshot.docs[0].data();
-          const lastNumber = parseInt(lastRelease.id.split('-')[1]);
+          const lastId = releasesSnapshot.docs[0].data().id;
+          const lastNumber = parseInt(lastId.split('-')[1]);
           nextNumber = lastNumber + 1;
         }
-        const newReleaseId = `RLS-${String(nextNumber).padStart(5, '0')}`;
 
-        // Create the release document
-        const releaseData = {
-          id: newReleaseId,
-          ...newRelease,
-          createdAt: Timestamp.now(),
-          status: "released",
-          previousAvailability: currentAvailability,
-          remainingAvailability: newAvailability
-        };
+        // Read all supply documents first
+        const supplyRefs = selectedSupplies.map(supply => doc(db, "supplies", supply.supplyId));
+        const supplyDocs = await Promise.all(supplyRefs.map(ref => transaction.get(ref)));
 
-        // Update both documents in the transaction
-        const newReleaseRef = doc(collection(db, "releases"));
-        transaction.set(newReleaseRef, releaseData);
-        transaction.update(supplyRef, { 
-          availability: newAvailability,
-          updatedAt: Timestamp.now()
-        });
+        // Validate all supplies and calculate new availabilities
+        const supplyUpdates = [];
+        const releaseData = [];
+
+        for (let i = 0; i < selectedSupplies.length; i++) {
+          const selectedSupply = selectedSupplies[i];
+          const supplyDoc = supplyDocs[i];
+
+          if (!supplyDoc.exists()) {
+            throw new Error(`Supply ${selectedSupply.supplyName} not found!`);
+          }
+
+          // Check if there's enough availability
+          const currentQuantity = supplyDoc.data().quantity || 0;
+          const currentAvailability = supplyDoc.data().availability ?? currentQuantity;
+          const releaseQuantity = parseInt(selectedSupply.quantity);
+
+          if (releaseQuantity > currentAvailability) {
+            throw new Error(`Not enough quantity available for ${selectedSupply.supplyName}!`);
+          }
+
+          const newAvailability = currentAvailability - releaseQuantity;
+
+          // Prepare supply update
+          supplyUpdates.push({
+            ref: supplyRefs[i],
+            data: {
+              availability: newAvailability,
+              updatedAt: Timestamp.now()
+            }
+          });
+
+          // Prepare release data with unique ID for each supply
+          const uniqueReleaseId = `RLS-${String(nextNumber + i).padStart(5, '0')}`;
+          releaseData.push({
+            id: uniqueReleaseId,
+            supplyId: selectedSupply.supplyId,
+            supplyName: selectedSupply.supplyName,
+            quantity: selectedSupply.quantity,
+            receivedBy: newRelease.receivedBy,
+            department: newRelease.department,
+            purpose: newRelease.purpose,
+            createdAt: Timestamp.now(),
+            status: "released",
+            previousAvailability: currentAvailability,
+            remainingAvailability: newAvailability
+          });
+        }
+
+        // Now perform all writes
+        for (const update of supplyUpdates) {
+          transaction.update(update.ref, update.data);
+        }
+
+        for (const data of releaseData) {
+          const newReleaseRef = doc(collection(db, "releases"));
+          transaction.set(newReleaseRef, data);
+        }
       });
 
       setDialogOpen(false);
       setNewRelease({
-        supplyId: "",
-        supplyDocId: "",
-        supplyName: "",
-        quantity: "",
         receivedBy: "",
         department: "",
         purpose: ""
       });
-      setSelectedSupply(null);
-      toast.success("Supply released successfully");
+      setSelectedSupplies([]);
+      toast.success(`${selectedSupplies.length} supply(ies) released successfully`);
     } catch (error) {
-      console.error("Error releasing supply:", error);
-      toast.error(error.message || "Failed to release supply");
+      console.error("Error releasing supplies:", error);
+      toast.error(error.message || "Failed to release supplies");
     } finally {
       setLoading(false);
     }
@@ -247,233 +268,326 @@ export function ReleaseSupply() {
           <h1 className="text-2xl font-semibold text-gray-800 dark:text-white">Release Supply</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">Manage and track supply releases</p>
         </div>
-          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-            <DialogTrigger asChild>
+        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+          <DialogTrigger asChild>
             <Button
-              variant="secondary"
               size="lg"
-              className="bg-gray-900 hover:bg-gray-800 text-white dark:bg-gray-800 dark:hover:bg-gray-700 gap-2"
+              className="bg-black hover:bg-gray-800 text-white dark:bg-white dark:hover:bg-gray-100 dark:text-black transition-colors gap-2"
             >
-                <Share2 className="w-4 h-4" />
-                Release Supply
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-[600px]">
-              <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <Share2 className="w-5 h-5" />
-                Release Supply
-              </DialogTitle>
-                <DialogDescription>
-                Fill out the form below to release a supply item.
-                </DialogDescription>
+              <Share2 className="w-4 h-4" />
+              Release Supply
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-hidden">
+            <div className="flex flex-col h-full">
+              {/* Minimalist Header */}
+              <DialogHeader className="pb-4 border-b border-gray-200 dark:border-gray-700">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-black dark:bg-white rounded-lg">
+                    <Share2 className="w-5 h-5 text-white dark:text-black" />
+                  </div>
+                  <div>
+                    <DialogTitle className="text-xl font-semibold text-black dark:text-white">
+                      Release Supply
+                    </DialogTitle>
+                    <DialogDescription className="text-gray-600 dark:text-gray-400 text-sm">
+                      Select supplies to release
+                    </DialogDescription>
+                  </div>
+                </div>
               </DialogHeader>
 
-            <form onSubmit={handleAddRelease} className="space-y-6">
-              {/* Supply Selection */}
-                  <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Select Supply
-                </label>
+              {/* Content */}
+              <div className="flex-1 overflow-y-auto py-4">
+                <form onSubmit={handleAddRelease} className="space-y-6">
+                  {/* Supply Selection */}
+                  <div className="space-y-3">
+                    <label className="text-sm font-medium text-black dark:text-white">
+                      Select Supplies
+                    </label>
+                    
                     <Popover open={open} onOpenChange={setOpen}>
                       <PopoverTrigger asChild>
                         <Button
                           variant="outline"
                           role="combobox"
                           aria-expanded={open}
-                          className="w-full justify-between"
+                          className="w-full justify-between h-10 border border-gray-300 dark:border-gray-600 hover:border-black dark:hover:border-white transition-colors"
                         >
-                          {selectedSupply
-                            ? supplies.find((supply) => supply.id === selectedSupply)?.name
-                        : "Select a supply..."}
+                          <span className={selectedSupplies.length > 0 ? "text-black dark:text-white" : "text-gray-500"}>
+                            {selectedSupplies.length > 0
+                              ? `${selectedSupplies.length} supply(ies) selected`
+                              : "Select supplies..."}
+                          </span>
                           <Package className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                         </Button>
                       </PopoverTrigger>
-                  <PopoverContent className="w-[400px] p-0">
-                        <Command>
-                          <CommandInput 
-                            placeholder="Search supplies..." 
+                      <PopoverContent className="w-[450px] p-0" align="start">
+                        <Command className="rounded-lg">
+                          <CommandInput
+                            placeholder="Search supplies..."
                             value={commandInputValue}
                             onValueChange={setCommandInputValue}
+                            className="h-10"
                           />
-                      <CommandEmpty>No supplies found.</CommandEmpty>
-                          <CommandGroup className="max-h-[300px] overflow-auto">
-                        {supplies.map((supply) => (
-                          <CommandItem
-                            key={supply.docId}
-                            onSelect={() => {
-                              setSelectedSupply(supply.id);
-                              setNewRelease(prev => ({
-                                ...prev,
-                                supplyId: supply.id,
-                                supplyDocId: supply.docId,
-                                supplyName: supply.name
-                              }));
-                              setOpen(false);
-                            }}
-                          >
-                            <div className="flex items-center gap-2">
-                              {supply.image ? (
-                                <img
-                                  src={supply.image}
-                                  alt={supply.name}
-                                  className="w-8 h-8 rounded-full object-cover"
-                                />
-                              ) : (
-                                <Package className="w-5 h-5 text-gray-400" />
-                              )}
-                              <div>
-                                <p className="font-medium">{supply.name}</p>
-                                <p className="text-xs text-gray-500">
-                                  Available: {supply.availability ?? supply.quantity}
-                                </p>
-                              </div>
+                          <CommandEmpty className="py-6 text-center">
+                            <Package className="w-6 h-6 mx-auto text-gray-400 mb-2" />
+                            <p className="text-gray-500 text-sm">No supplies found</p>
+                          </CommandEmpty>
+                          <CommandGroup className="max-h-[250px] overflow-auto">
+                            {supplies.map((supply) => {
+                              const isSelected = selectedSupplies.some(s => s.supplyId === supply.id);
+                              return (
+                                <CommandItem
+                                  key={supply.id}
+                                  onSelect={() => {
+                                    if (isSelected) {
+                                      setSelectedSupplies(prev => prev.filter(s => s.supplyId !== supply.id));
+                                    } else {
+                                      setSelectedSupplies(prev => [...prev, {
+                                        supplyId: supply.id,
+                                        supplyName: supply.name,
+                                        quantity: "1"
+                                      }]);
+                                    }
+                                  }}
+                                  className="cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
+                                >
+                                  <div className="flex items-center gap-3 w-full">
+                                    <div className="flex-shrink-0">
+                                      {supply.image ? (
+                                        <img
+                                          src={supply.image}
+                                          alt={supply.name}
+                                          className="w-8 h-8 rounded-md object-cover border border-gray-200 dark:border-gray-700"
+                                        />
+                                      ) : (
+                                        <div className="w-8 h-8 rounded-md bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
+                                          <Package className="w-4 h-4 text-gray-500" />
+                                        </div>
+                                      )}
                                     </div>
-                            <Check
-                              className={cn(
-                                "ml-auto h-4 w-4",
-                                selectedSupply === supply.id
-                                  ? "opacity-100"
-                                  : "opacity-0"
-                              )}
-                            />
-                                  </CommandItem>
-                                ))}
+                                    <div className="flex-1 min-w-0">
+                                      <p className="font-medium text-black dark:text-white truncate">{supply.name}</p>
+                                      <div className="flex items-center gap-2 mt-1">
+                                        <span className="text-xs text-gray-500">
+                                          Available: {supply.availability ?? supply.quantity}
+                                        </span>
+                                        {supply.classification && (
+                                          <span className="text-xs text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded">
+                                            {supply.classification}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                    <Check
+                                      className={cn(
+                                        "ml-auto h-4 w-4 transition-colors",
+                                        isSelected 
+                                          ? "opacity-100 text-black dark:text-white" 
+                                          : "opacity-0 text-gray-400"
+                                      )}
+                                    />
+                                  </div>
+                                </CommandItem>
+                              );
+                            })}
                           </CommandGroup>
                         </Command>
                       </PopoverContent>
                     </Popover>
                   </div>
 
-              {/* Quantity */}
-                  <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Quantity
-                </label>
-                    <Input
-                      type="number"
-                      min="1"
-                      value={newRelease.quantity}
-                      onChange={(e) => setNewRelease(prev => ({ ...prev, quantity: e.target.value }))}
-                  placeholder="Enter quantity"
-                  required
-                    />
-                  </div>
-
-              {/* Received By */}
-                  <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Received By
-                </label>
-                    <Input
-                      value={newRelease.receivedBy}
-                      onChange={(e) => setNewRelease(prev => ({ ...prev, receivedBy: e.target.value }))}
-                  placeholder="Enter recipient name"
-                  required
-                    />
-                  </div>
-
-              {/* Department */}
-                  <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Department
-                </label>
-                    <Input
-                      value={newRelease.department}
-                      onChange={(e) => setNewRelease(prev => ({ ...prev, department: e.target.value }))}
-                      placeholder="Enter department"
-                  required
-                    />
-                  </div>
-
-              {/* Purpose */}
-                  <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Purpose
-                </label>
-                    <Input
-                      value={newRelease.purpose}
-                      onChange={(e) => setNewRelease(prev => ({ ...prev, purpose: e.target.value }))}
-                  placeholder="Enter purpose"
-                  required
-                    />
-                </div>
-
-              {/* Submit Button */}
-              <div className="flex justify-end gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setDialogOpen(false)}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  className="bg-gray-900 hover:bg-gray-800 text-white dark:bg-gray-800 dark:hover:bg-gray-700"
-                  disabled={loading}
-                >
-                  {loading ? (
-                    <>
-                      <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
-                      Releasing...
-                    </>
-                  ) : (
-                    <>
-                      <Share2 className="w-4 h-4 mr-2" />
-                      Release Supply
-                    </>
+                  {/* Selected Supplies */}
+                  {selectedSupplies.length > 0 && (
+                    <div className="space-y-3">
+                      <label className="text-sm font-medium text-black dark:text-white">
+                        Selected Supplies ({selectedSupplies.length})
+                      </label>
+                      
+                      <div className="space-y-2 max-h-48 overflow-y-auto">
+                        {selectedSupplies.map((selectedSupply, index) => (
+                          <div
+                            key={selectedSupply.supplyId}
+                            className="flex items-center gap-3 p-3 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800"
+                          >
+                            <div className="flex-1">
+                              <p className="font-medium text-black dark:text-white text-sm">{selectedSupply.supplyName}</p>
+                              <p className="text-xs text-gray-500 mt-1">
+                                Available: {supplies.find(s => s.id === selectedSupply.supplyId)?.availability ?? supplies.find(s => s.id === selectedSupply.supplyId)?.quantity}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Input
+                                type="number"
+                                min="1"
+                                max={supplies.find(s => s.id === selectedSupply.supplyId)?.availability ?? supplies.find(s => s.id === selectedSupply.supplyId)?.quantity}
+                                value={selectedSupply.quantity}
+                                onChange={(e) => {
+                                  setSelectedSupplies(prev => prev.map((s, i) => 
+                                    i === index ? { ...s, quantity: e.target.value } : s
+                                  ));
+                                }}
+                                className="w-20 h-8 text-center text-sm"
+                                placeholder="Qty"
+                              />
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  setSelectedSupplies(prev => prev.filter((_, i) => i !== index));
+                                }}
+                                className="text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 p-1 h-8 w-8"
+                              >
+                                ×
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   )}
-                </Button>
-              </div>
-              </form>
-            </DialogContent>
-          </Dialog>
-        </div>
 
-        {/* Stats Cards */}
+                  {/* Recipient Information */}
+                  <div className="space-y-4">
+                    <label className="text-sm font-medium text-black dark:text-white">
+                      Recipient Information
+                    </label>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                          Received By
+                        </label>
+                        <Input
+                          value={newRelease.receivedBy}
+                          onChange={(e) => setNewRelease(prev => ({ ...prev, receivedBy: e.target.value }))}
+                          placeholder="Enter recipient name"
+                          required
+                          className="h-9"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                          Department
+                        </label>
+                        <Input
+                          value={newRelease.department}
+                          onChange={(e) => setNewRelease(prev => ({ ...prev, department: e.target.value }))}
+                          placeholder="Enter department"
+                          required
+                          className="h-9"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Purpose
+                      </label>
+                      <Input
+                        value={newRelease.purpose}
+                        onChange={(e) => setNewRelease(prev => ({ ...prev, purpose: e.target.value }))}
+                        placeholder="Enter purpose"
+                        required
+                        className="h-9"
+                      />
+                    </div>
+                  </div>
+                </form>
+              </div>
+
+              {/* Footer */}
+              <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+                <div className="flex justify-between items-center">
+                  <div className="text-sm text-gray-500 dark:text-gray-400">
+                    {selectedSupplies.length > 0 && (
+                      <span className="flex items-center gap-2">
+                        <Package className="w-4 h-4" />
+                        {selectedSupplies.length} supply(ies) ready
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex gap-3">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setDialogOpen(false)}
+                      className="px-4"
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      type="submit"
+                      onClick={handleAddRelease}
+                      disabled={loading || selectedSupplies.length === 0}
+                      className="bg-black hover:bg-gray-800 text-white dark:bg-white dark:hover:bg-gray-100 dark:text-black px-4 transition-colors disabled:opacity-50"
+                    >
+                      {loading ? (
+                        <div className="flex items-center gap-2">
+                          <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                          Releasing...
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <Share2 className="w-4 h-4" />
+                          Release
+                        </div>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 px-6">
         <Card className="bg-blue-50/50 dark:bg-blue-900/20">
           <CardContent className="p-6">
             <div className="flex items-center justify-between">
-                <div>
+              <div>
                 <p className="text-sm font-medium text-blue-600 dark:text-blue-400">Total Releases</p>
                 <h3 className="text-2xl font-bold text-blue-700 dark:text-blue-300">{stats.totalReleases}</h3>
-                </div>
+              </div>
               <div className="p-3 bg-blue-100 dark:bg-blue-900/40 rounded-full">
                 <Share2 className="w-5 h-5 text-blue-600 dark:text-blue-400" />
               </div>
             </div>
           </CardContent>
-            </Card>
+        </Card>
 
         <Card className="bg-green-50/50 dark:bg-green-900/20">
           <CardContent className="p-6">
             <div className="flex items-center justify-between">
-                <div>
+              <div>
                 <p className="text-sm font-medium text-green-600 dark:text-green-400">Today's Releases</p>
                 <h3 className="text-2xl font-bold text-green-700 dark:text-green-300">{stats.todayReleases}</h3>
-                </div>
+              </div>
               <div className="p-3 bg-green-100 dark:bg-green-900/40 rounded-full">
                 <History className="w-5 h-5 text-green-600 dark:text-green-400" />
               </div>
             </div>
           </CardContent>
-            </Card>
+        </Card>
 
         <Card className="bg-purple-50/50 dark:bg-purple-900/20">
           <CardContent className="p-6">
             <div className="flex items-center justify-between">
-                <div>
+              <div>
                 <p className="text-sm font-medium text-purple-600 dark:text-purple-400">Unique Recipients</p>
                 <h3 className="text-2xl font-bold text-purple-700 dark:text-purple-300">{stats.uniqueRecipients}</h3>
-                </div>
+              </div>
               <div className="p-3 bg-purple-100 dark:bg-purple-900/40 rounded-full">
                 <Users className="w-5 h-5 text-purple-600 dark:text-purple-400" />
               </div>
             </div>
           </CardContent>
-            </Card>
+        </Card>
       </div>
 
       {/* Table Section */}
