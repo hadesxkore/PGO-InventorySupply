@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardContent } from "../ui/card";
 import { Button } from "../ui/button";
@@ -32,6 +32,7 @@ import {
   TableHeader,
   TableRow,
 } from "../ui/table";
+
 import { cn } from "../../lib/utils";
 import { 
   collection, 
@@ -73,12 +74,66 @@ export function ReleaseSupply() {
   const [editingRelease, setEditingRelease] = useState(null);
   const [sortField, setSortField] = useState('supplyName');
   const [sortOrder, setSortOrder] = useState('asc');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 12;
 
   const [newRelease, setNewRelease] = useState({
     receivedBy: "",
     department: "",
     purpose: ""
   });
+
+  const [showRecipientSuggestions, setShowRecipientSuggestions] = useState(false);
+  const [filteredRecipients, setFilteredRecipients] = useState([]);
+
+  // Get unique previous recipients for autocomplete - memoized to prevent infinite loops
+  const previousRecipients = React.useMemo(() => {
+    return [...new Set(releases.map(release => release.receivedBy).filter(Boolean))];
+  }, [releases]);
+
+  // Pagination logic
+  const totalPages = Math.ceil(filteredReleases.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const currentReleases = filteredReleases.slice(startIndex, endIndex);
+
+  // Reset to first page when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, selectedDate, sortField, sortOrder]);
+
+  // Handle recipient autocomplete with debounce
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      const query = newRelease.receivedBy.trim();
+      if (query) {
+        const filtered = previousRecipients.filter(recipient =>
+          recipient.toLowerCase().includes(query.toLowerCase())
+        );
+        setFilteredRecipients(filtered);
+        setShowRecipientSuggestions(filtered.length > 0);
+      } else {
+        setShowRecipientSuggestions(false);
+        setFilteredRecipients([]);
+      }
+    }, 100); // 100ms debounce
+
+    return () => clearTimeout(timeoutId);
+  }, [newRelease.receivedBy, previousRecipients]);
+
+  // Highlight matching text in suggestions
+  const highlightMatch = (text, query) => {
+    if (!query.trim()) return text;
+    const regex = new RegExp(`(${query})`, 'gi');
+    const parts = text.split(regex);
+    return parts.map((part, index) => 
+      regex.test(part) ? (
+        <span key={index} className="bg-yellow-200 dark:bg-yellow-800 font-semibold">
+          {part}
+        </span>
+      ) : part
+    );
+  };
 
   // Debug logs
   console.log('ReleaseSupply Component:', {
@@ -262,7 +317,7 @@ export function ReleaseSupply() {
           const releaseQuantity = parseInt(selectedSupply.quantity);
 
           console.log('Availability check:', {
-            currentQuantity,
+            currentQuanty,
             currentAvailability,
             releaseQuantity,
             supplyName: selectedSupply.supplyName
@@ -361,7 +416,8 @@ export function ReleaseSupply() {
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="space-y-6"
+      className="space-y-6 custom-scrollbar"
+      style={{ maxHeight: '100vh', overflowY: 'auto' }}
     >
       {/* Header Section */}
       <div className="flex items-center justify-between p-6">
@@ -399,7 +455,7 @@ export function ReleaseSupply() {
               </DialogHeader>
 
               {/* Content */}
-              <div className="flex-1 overflow-y-auto py-4">
+              <div className="flex-1 overflow-y-auto py-4 custom-scrollbar">
                 <form onSubmit={handleAddRelease} className="space-y-6">
                   {/* Supply Selection */}
                   <div className="space-y-3">
@@ -435,7 +491,7 @@ export function ReleaseSupply() {
                             <Package className="w-6 h-6 mx-auto text-gray-400 mb-2" />
                             <p className="text-gray-500 text-sm">No supplies found</p>
                           </CommandEmpty>
-                          <CommandGroup className="max-h-[250px] overflow-auto">
+                          <CommandGroup className="max-h-[250px] overflow-auto custom-scrollbar">
                             {supplies.map((supply) => {
                               // The supply object has both Firestore doc ID and custom ID field, both called 'id'
                               // We need to distinguish between them
@@ -526,7 +582,7 @@ export function ReleaseSupply() {
                         Selected Supplies ({selectedSupplies.length})
                       </label>
                       
-                      <div className="space-y-2 max-h-48 overflow-y-auto">
+                      <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar">
                         {selectedSupplies.map((selectedSupply, index) => (
                           <div
                             key={selectedSupply.supplyId}
@@ -581,13 +637,48 @@ export function ReleaseSupply() {
                         <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
                           Received By
                         </label>
-                        <Input
-                          value={newRelease.receivedBy}
-                          onChange={(e) => setNewRelease(prev => ({ ...prev, receivedBy: e.target.value }))}
-                          placeholder="Enter recipient name"
-                          required
-                          className="h-9"
-                        />
+                        <div className="relative">
+                          <Input
+                            value={newRelease.receivedBy}
+                            onChange={(e) => setNewRelease(prev => ({ ...prev, receivedBy: e.target.value }))}
+                            onFocus={() => {
+                              if (newRelease.receivedBy.trim() && filteredRecipients.length > 0) {
+                                setShowRecipientSuggestions(true);
+                              }
+                            }}
+                            onBlur={() => {
+                              // Delay hiding to allow clicking on suggestions
+                              setTimeout(() => setShowRecipientSuggestions(false), 200);
+                            }}
+                            placeholder="Enter recipient name"
+                            required
+                            className="h-9"
+                          />
+                          
+                          {/* Autocomplete Suggestions */}
+                          {showRecipientSuggestions && (
+                            <div className="absolute top-full left-0 right-0 z-50 mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg max-h-48 overflow-y-auto custom-scrollbar">
+                              {filteredRecipients.map((recipient, index) => (
+                                <button
+                                  key={index}
+                                  type="button"
+                                  onClick={() => {
+                                    setNewRelease(prev => ({ ...prev, receivedBy: recipient }));
+                                    setShowRecipientSuggestions(false);
+                                  }}
+                                  className="w-full px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors border-b border-gray-100 dark:border-gray-700 last:border-b-0"
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <Users className="w-4 h-4 text-gray-400" />
+                                    <span className="text-sm">
+                                      {highlightMatch(recipient, newRelease.receivedBy)}
+                                    </span>
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </div>
 
                       <div className="space-y-2">
@@ -881,7 +972,7 @@ export function ReleaseSupply() {
                 </PopoverContent>
               </Popover>
               <div className="text-sm text-gray-500 dark:text-gray-400">
-                Showing {filteredReleases.length} releases
+                Showing {startIndex + 1}-{Math.min(endIndex, filteredReleases.length)} of {filteredReleases.length} releases
                 {selectedDate && ` for ${format(selectedDate, 'PP')}`}
                 {` (${sortOrder === 'asc' ? 'A-Z' : 'Z-A'})`}
               </div>
@@ -890,7 +981,10 @@ export function ReleaseSupply() {
         </div>
 
         <div className="p-4">
-          <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+          <div className={cn(
+            "overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700",
+            filteredReleases.length > itemsPerPage && "max-h-[600px] overflow-y-auto custom-scrollbar"
+          )}>
             <Table>
               <TableHeader>
                 <TableRow className="bg-gray-50 dark:bg-gray-800">
@@ -920,7 +1014,7 @@ export function ReleaseSupply() {
               </TableHeader>
               <TableBody>
                 <AnimatePresence>
-                  {filteredReleases.map((release, index) => (
+                  {currentReleases.map((release, index) => (
                     <motion.tr
                       key={release.id}
                       initial={{ opacity: 0, y: 20 }}
@@ -1046,6 +1140,63 @@ export function ReleaseSupply() {
               </TableBody>
             </Table>
           </div>
+          
+          {/* Pagination */}
+          {filteredReleases.length > 0 && (
+            <div className="mt-6 flex justify-between items-center px-6 py-4 border-t border-gray-200 dark:border-gray-700">
+              <div className="text-sm text-gray-500 dark:text-gray-400">
+                Showing {startIndex + 1} to {Math.min(endIndex, filteredReleases.length)} of {filteredReleases.length} releases
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                  disabled={currentPage === 1}
+                  className="gap-2"
+                >
+                  Previous
+                </Button>
+
+                <div className="flex items-center gap-1">
+                  {Array.from({ length: totalPages }, (_, i) => i + 1)
+                    .filter(page => {
+                      if (page === 1 || page === totalPages) return true;
+                      if (page >= currentPage - 1 && page <= currentPage + 1) return true;
+                      return false;
+                    })
+                    .map((page, i, arr) => (
+                      <React.Fragment key={page}>
+                        {i > 0 && arr[i - 1] !== page - 1 && (
+                          <span className="text-gray-400 dark:text-gray-600">...</span>
+                        )}
+                        <Button
+                          variant={currentPage === page ? "default" : "outline"}
+                          size="sm"
+                          onClick={() => setCurrentPage(page)}
+                          className={cn(
+                            "h-8 w-8 p-0",
+                            currentPage === page && "bg-blue-600 hover:bg-blue-700"
+                          )}
+                        >
+                          {page}
+                        </Button>
+                      </React.Fragment>
+                    ))}
+                </div>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                  disabled={currentPage === totalPages}
+                  className="gap-2"
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </motion.div>
