@@ -43,7 +43,8 @@ import {
   updateDoc,
   query,
   orderBy,
-  limit
+  limit,
+  where
 } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { Search, Plus, Package, Share2, History, Users, ArrowRight, Edit, Filter, Calendar, ArrowUpDown, Check, ChevronUp, ChevronDown } from "lucide-react";
@@ -200,6 +201,9 @@ export function ReleaseSupply() {
     }
 
     try {
+      console.log('Starting release process with supplies:', selectedSupplies);
+      console.log('Available supplies from context:', supplies.map(s => ({ id: s.id, name: s.name })));
+      
       // Start a Firestore transaction
       await runTransaction(db, async (transaction) => {
         // First, get the next release ID with RLS prefix
@@ -213,9 +217,22 @@ export function ReleaseSupply() {
           nextNumber = lastNumber + 1;
         }
 
-        // Read all supply documents first
-        const supplyRefs = selectedSupplies.map(supply => doc(db, "supplies", supply.supplyId));
-        const supplyDocs = await Promise.all(supplyRefs.map(ref => transaction.get(ref)));
+        // Read all supply documents first using queries instead of direct references
+        const supplyQueries = selectedSupplies.map(supply => {
+          console.log('Creating query for supply:', {
+            supplyId: supply.supplyId,
+            supplyName: supply.supplyName
+          });
+          return query(collection(db, "supplies"), where("id", "==", supply.supplyId));
+        });
+        
+        const supplySnapshots = await Promise.all(supplyQueries.map(q => getDocs(q)));
+        const supplyDocs = supplySnapshots.map(snapshot => {
+          if (snapshot.empty) {
+            return null;
+          }
+          return snapshot.docs[0]; // Get the first (and should be only) document
+        });
 
         // Validate all supplies and calculate new availabilities
         const supplyUpdates = [];
@@ -225,24 +242,42 @@ export function ReleaseSupply() {
           const selectedSupply = selectedSupplies[i];
           const supplyDoc = supplyDocs[i];
 
-          if (!supplyDoc.exists()) {
-            throw new Error(`Supply ${selectedSupply.supplyName} not found!`);
+          console.log(`Processing supply ${i + 1}:`, {
+            supplyId: selectedSupply.supplyId,
+            supplyName: selectedSupply.supplyName,
+            docExists: supplyDoc !== null,
+            docData: supplyDoc ? supplyDoc.data() : null,
+            docId: supplyDoc ? supplyDoc.id : null
+          });
+
+          if (!supplyDoc) {
+            throw new Error(`Supply "${selectedSupply.supplyName}" (ID: ${selectedSupply.supplyId}) not found in database!`);
           }
 
+          const supplyData = supplyDoc.data();
+          
           // Check if there's enough availability
-          const currentQuantity = supplyDoc.data().quantity || 0;
-          const currentAvailability = supplyDoc.data().availability ?? currentQuantity;
+          const currentQuantity = supplyData.quantity || 0;
+          const currentAvailability = supplyData.availability ?? currentQuantity;
           const releaseQuantity = parseInt(selectedSupply.quantity);
 
+          console.log('Availability check:', {
+            currentQuantity,
+            currentAvailability,
+            releaseQuantity,
+            supplyName: selectedSupply.supplyName
+          });
+
           if (releaseQuantity > currentAvailability) {
-            throw new Error(`Not enough quantity available for ${selectedSupply.supplyName}!`);
+            throw new Error(`Not enough quantity available for "${selectedSupply.supplyName}"! Available: ${currentAvailability}, Requested: ${releaseQuantity}`);
           }
 
           const newAvailability = currentAvailability - releaseQuantity;
 
-          // Prepare supply update
+          // Prepare supply update using the actual document reference
+          const supplyRef = doc(db, "supplies", supplyDoc.id);
           supplyUpdates.push({
-            ref: supplyRefs[i],
+            ref: supplyRef,
             data: {
               availability: newAvailability,
               updatedAt: Timestamp.now()
@@ -265,6 +300,11 @@ export function ReleaseSupply() {
             remainingAvailability: newAvailability
           });
         }
+
+        console.log('Performing updates:', {
+          supplyUpdates: supplyUpdates.length,
+          releaseData: releaseData.length
+        });
 
         // Now perform all writes
         for (const update of supplyUpdates) {
@@ -397,16 +437,36 @@ export function ReleaseSupply() {
                           </CommandEmpty>
                           <CommandGroup className="max-h-[250px] overflow-auto">
                             {supplies.map((supply) => {
-                              const isSelected = selectedSupplies.some(s => s.supplyId === supply.id);
+                              // The supply object has both Firestore doc ID and custom ID field, both called 'id'
+                              // We need to distinguish between them
+                              const firestoreDocId = supply.id; // This is the Firestore document ID
+                              const customIdField = supply.id; // This is the custom ID field from document data
+                              const isSelected = selectedSupplies.some(s => s.supplyId === customIdField);
+                              
+                              console.log('Supply in dropdown:', {
+                                firestoreDocId: firestoreDocId,
+                                customIdField: customIdField,
+                                name: supply.name,
+                                allFields: Object.keys(supply),
+                                // Check if there are two different 'id' fields
+                                hasCustomId: supply.id !== undefined,
+                                supplyObject: supply
+                              });
+                              
                               return (
                                 <CommandItem
-                                  key={supply.id}
+                                  key={firestoreDocId}
                                   onSelect={() => {
                                     if (isSelected) {
-                                      setSelectedSupplies(prev => prev.filter(s => s.supplyId !== supply.id));
+                                      setSelectedSupplies(prev => prev.filter(s => s.supplyId !== customIdField));
                                     } else {
+                                      console.log('Adding supply to selection:', {
+                                        supplyId: customIdField,
+                                        supplyName: supply.name,
+                                        firestoreDocId: firestoreDocId
+                                      });
                                       setSelectedSupplies(prev => [...prev, {
-                                        supplyId: supply.id,
+                                        supplyId: customIdField, // Use custom ID field for querying
                                         supplyName: supply.name,
                                         quantity: "1"
                                       }]);
