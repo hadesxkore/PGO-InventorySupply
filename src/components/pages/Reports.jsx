@@ -232,21 +232,21 @@ export function Reports() {
       const headers = Object.keys(filteredData[0] || {});
       const data = filteredData.map(item => Object.values(item));
       
-      // Calculate table width (total of column widths)
-      const tableWidth = 180; // Increased width to accommodate new column
-      const tableX = (pageWidth - tableWidth) / 2; // Center the table
-
       // Add table with footer space consideration - adjusted start position
       autoTable(doc, {
         head: [headers],
         body: data,
         startY: margin + 60,
-        margin: { left: tableX, bottom: footerHeight },
+        margin: { left: 10, right: 10, bottom: footerHeight },
         styles: { 
           fontSize: 8,
-          cellPadding: 2,
-          halign: 'center',
+          cellPadding: { top: 4, right: 3, bottom: 4, left: 3 },
+          halign: 'left',
           valign: 'middle',
+          lineColor: [200, 200, 200],
+          lineWidth: 0.1,
+          minCellHeight: 12,
+          cellWidth: 'wrap'
         },
         headStyles: { 
           fillColor: [59, 130, 246],
@@ -254,23 +254,32 @@ export function Reports() {
           fontStyle: 'bold',
           halign: 'center',
           textColor: [255, 255, 255],
-          cellPadding: 3,
+          cellPadding: { top: 4, right: 3, bottom: 4, left: 3 },
         },
         columnStyles: {
-          0: { cellWidth: 25 }, // ID
-          1: { cellWidth: 40 }, // Name/Supply Name
-          2: { cellWidth: 35 }, // Classification
-          3: { cellWidth: 25 }, // Quantity
-          4: { cellWidth: 25 }, // Unit/Other fields
-          5: { cellWidth: 30 }, // Cluster/Other fields
+          0: { cellWidth: 22, halign: 'center' }, // ID
+          1: { cellWidth: 35, halign: 'left' }, // Supply Name
+          2: { cellWidth: 25, halign: 'center' }, // Classification
+          3: { cellWidth: 18, halign: 'center' }, // Quantity
+          4: { cellWidth: 15, halign: 'center' }, // Unit
+          5: { cellWidth: 25, halign: 'center' }, // Received By
+          6: { cellWidth: 15, halign: 'center' }, // Department
+          7: { cellWidth: 18, halign: 'center' }, // Purpose
+          8: { cellWidth: 22, halign: 'center' }, // Date Released
         },
         alternateRowStyles: {
           fillColor: [245, 247, 250]
         },
-        tableWidth: tableWidth,
         theme: 'grid',
         bodyStyles: {
           lineWidth: 0.1,
+        },
+        tableWidth: 'auto',
+        didParseCell: function(data) {
+          // Ensure text wrapping for long content
+          if (data.cell.raw && data.cell.raw.toString().length > 20) {
+            data.cell.styles.cellWidth = 'wrap';
+          }
         },
         didDrawPage: function (data) {
           // Add footer on each page
