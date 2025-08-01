@@ -154,6 +154,62 @@ export function ReleaseSupply() {
     );
   };
 
+  // Function to update classifications for existing releases
+  const updateExistingReleaseClassifications = async () => {
+    try {
+      // Get all releases that need classification updates
+      const releasesToUpdate = releases.filter(release => {
+        // Find the corresponding supply
+        const supply = supplies.find(s => s.id === release.supplyId);
+        
+        // Only update if:
+        // 1. Release has no classification or N/A AND
+        // 2. Supply exists and has a different classification
+        return (!release.classification || release.classification === 'N/A') &&
+               supply && 
+               supply.classification &&
+               release.classification !== supply.classification;
+      });
+      
+      if (releasesToUpdate.length === 0) {
+        console.log('No releases need classification updates');
+        return;
+      }
+
+      console.log(`Updating classifications for ${releasesToUpdate.length} releases`);
+
+      for (const release of releasesToUpdate) {
+        const supply = supplies.find(s => s.id === release.supplyId);
+        const releaseRef = doc(db, "releases", release.docId);
+        await updateDoc(releaseRef, {
+          classification: supply.classification
+        });
+        console.log(`Updated classification for release ${release.id} to ${supply.classification}`);
+      }
+
+      if (releasesToUpdate.length > 0) {
+        toast.success(`Updated classifications for ${releasesToUpdate.length} releases`);
+      }
+    } catch (error) {
+      console.error('Error updating release classifications:', error);
+      toast.error('Failed to update release classifications');
+    }
+  };
+
+  // Use a ref to track if we've already run the update
+  const hasRunUpdate = React.useRef(false);
+
+  // Call the update function only once when supplies and releases are first loaded
+  useEffect(() => {
+    if (!isContextLoading && 
+        supplies.length > 0 && 
+        releases.length > 0 && 
+        !hasRunUpdate.current) {
+      hasRunUpdate.current = true;
+      updateExistingReleaseClassifications();
+    }
+  }, [isContextLoading, supplies.length, releases.length]);
+
   // Debug logs
   console.log('ReleaseSupply Component:', {
     contextData: { releasesCount: releases.length, suppliesCount: supplies.length, stats },
@@ -223,6 +279,10 @@ export function ReleaseSupply() {
         case 'supplyName':
           compareA = (a.supplyName || '').toLowerCase();
           compareB = (b.supplyName || '').toLowerCase();
+          break;
+        case 'classification':
+          compareA = (a.classification || 'N/A').toLowerCase();
+          compareB = (b.classification || 'N/A').toLowerCase();
           break;
         case 'quantity':
           compareA = parseInt(a.quantity);
@@ -360,10 +420,15 @@ export function ReleaseSupply() {
 
           // Prepare release data with unique ID for each supply
           const uniqueReleaseId = `RLS-${String(nextNumber + i).padStart(5, '0')}`;
+          // Get the supply's current classification
+          const currentSupply = supplies.find(s => s.id === selectedSupply.supplyId);
+          const classification = currentSupply?.classification || supplyData.classification || 'N/A';
+
           releaseData.push({
             id: uniqueReleaseId,
             supplyId: selectedSupply.supplyId,
             supplyName: selectedSupply.supplyName,
+            classification: classification,
             quantity: selectedSupply.quantity,
             receivedBy: newRelease.receivedBy,
             department: newRelease.department,
@@ -522,6 +587,7 @@ export function ReleaseSupply() {
                                       setSelectedSupplies(prev => [...prev, {
                                         supplyId: customIdField, // Use custom ID field for querying
                                         supplyName: supply.name,
+                                        classification: supply.classification || 'N/A',
                                         quantity: "1"
                                       }]);
                                     }
@@ -542,17 +608,15 @@ export function ReleaseSupply() {
                                         </div>
                                       )}
                                     </div>
-                                    <div className="flex-1 min-w-0">
+                                                                          <div className="flex-1 min-w-0">
                                       <p className="font-medium text-black dark:text-white truncate">{supply.name}</p>
                                       <div className="flex items-center gap-2 mt-1">
                                         <span className="text-xs text-gray-500">
                                           Available: {supply.availability ?? supply.quantity}
                                         </span>
-                                        {supply.classification && (
-                                          <span className="text-xs text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded">
-                                            {supply.classification}
-                                          </span>
-                                        )}
+                                        <span className="text-xs text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20 px-2 py-1 rounded">
+                                          {supply.classification || 'N/A'}
+                                        </span>
                                       </div>
                                     </div>
                                     <Check
@@ -588,9 +652,14 @@ export function ReleaseSupply() {
                           >
                             <div className="flex-1">
                               <p className="font-medium text-black dark:text-white text-sm">{selectedSupply.supplyName}</p>
-                              <p className="text-xs text-gray-500 mt-1">
-                                Available: {supplies.find(s => s.id === selectedSupply.supplyId)?.availability ?? supplies.find(s => s.id === selectedSupply.supplyId)?.quantity}
-                              </p>
+                              <div className="flex items-center gap-2 mt-1">
+                                <p className="text-xs text-gray-500">
+                                  Available: {supplies.find(s => s.id === selectedSupply.supplyId)?.availability ?? supplies.find(s => s.id === selectedSupply.supplyId)?.quantity}
+                                </p>
+                                <span className="text-xs text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20 px-2 py-1 rounded">
+                                  {selectedSupply.classification}
+                                </span>
+                              </div>
                             </div>
                             <div className="flex items-center gap-2">
                               <Input
@@ -919,6 +988,20 @@ export function ReleaseSupply() {
                   >
                     <ChevronDown className="h-4 w-4" /> Z to A
                   </DropdownMenuItem>
+                  <DropdownMenuItem disabled className="font-medium text-sm text-muted-foreground px-2 py-1.5 mt-2">Sort by Classification</DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => { setSortField('classification'); setSortOrder('asc'); }}
+                    className={cn("gap-2", sortField === 'classification' && sortOrder === 'asc' && "bg-accent")}
+                  >
+                    <ChevronUp className="h-4 w-4" /> A to Z
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => { setSortField('classification'); setSortOrder('desc'); }}
+                    className={cn("gap-2", sortField === 'classification' && sortOrder === 'desc' && "bg-accent")}
+                  >
+                    <ChevronDown className="h-4 w-4" /> Z to A
+                  </DropdownMenuItem>
+
                   <DropdownMenuItem disabled className="font-medium text-sm text-muted-foreground px-2 py-1.5 mt-2">Sort by Quantity</DropdownMenuItem>
                   <DropdownMenuItem
                     onClick={() => { setSortField('quantity'); setSortOrder('asc'); }}
@@ -1055,6 +1138,9 @@ export function ReleaseSupply() {
                   <TableHead className="py-3 text-sm font-semibold cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700" onClick={() => handleSort('supplyName')}>
                     <div className="flex items-center gap-1">Supply Name {renderSortIndicator('supplyName')}</div>
                   </TableHead>
+                  <TableHead className="py-3 text-sm font-semibold cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700" onClick={() => handleSort('classification')}>
+                    <div className="flex items-center gap-1">Classification {renderSortIndicator('classification')}</div>
+                  </TableHead>
                   <TableHead className="py-3 text-sm font-semibold cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700" onClick={() => handleSort('quantity')}>
                     <div className="flex items-center gap-1">Quantity {renderSortIndicator('quantity')}</div>
                   </TableHead>
@@ -1090,6 +1176,11 @@ export function ReleaseSupply() {
                       <TableCell className="py-3 text-sm">
                         <span className="px-2.5 py-1 rounded-md bg-blue-50 dark:bg-blue-900/20 font-medium">
                           {release.supplyName}
+                        </span>
+                      </TableCell>
+                      <TableCell className="py-3 text-sm">
+                        <span className="px-2.5 py-1 rounded-md bg-purple-50 dark:bg-purple-900/20 font-medium">
+                          {release.classification || 'N/A'}
                         </span>
                       </TableCell>
                       <TableCell className="py-3 text-sm">
