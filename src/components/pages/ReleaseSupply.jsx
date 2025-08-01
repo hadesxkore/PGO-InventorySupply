@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  DialogFooter,
 } from "../ui/dialog";
 import { toast, Toaster } from "sonner";
 import { 
@@ -49,7 +50,7 @@ import {
   where
 } from "firebase/firestore";
 import { db } from "../../lib/firebase";
-import { Search, Plus, Package, Share2, History, Users, ArrowRight, Edit, Filter, Calendar, ArrowUpDown, Check, ChevronUp, ChevronDown } from "lucide-react";
+import { Search, Plus, Package, Share2, History, Users, ArrowRight, Filter, Calendar, ArrowUpDown, Check, ChevronUp, ChevronDown } from "lucide-react";
 import { format } from "date-fns";
 import { Calendar as CalendarComponent } from "../ui/calendar";
 import { useReleases } from "../../lib/ReleaseContext";
@@ -70,20 +71,36 @@ export function ReleaseSupply() {
   const [selectedSupplies, setSelectedSupplies] = useState([]);
   const [open, setOpen] = useState(false);
   const [commandInputValue, setCommandInputValue] = useState("");
+  const [selectedRelease, setSelectedRelease] = useState(null);
   const [selectedDate, setSelectedDate] = useState(null);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
-  const [editingRelease, setEditingRelease] = useState(null);
-  const [editDatePickerOpen, setEditDatePickerOpen] = useState(false);
   const [sortField, setSortField] = useState('supplyName');
   const [sortOrder, setSortOrder] = useState('asc');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 12;
 
-  const [newRelease, setNewRelease] = useState({
-    receivedBy: "",
-    department: "",
-    purpose: ""
+  const [draftSaved, setDraftSaved] = useState(false);
+  const [newRelease, setNewRelease] = useState(() => {
+    // Try to load draft from localStorage
+    const savedDraft = localStorage.getItem('releaseSupplyDraft');
+    if (savedDraft) {
+      return JSON.parse(savedDraft);
+    }
+    return {
+      receivedBy: "",
+      department: "",
+      purpose: ""
+    };
   });
+
+  // Load drafted supplies if they exist
+  useEffect(() => {
+    const savedSupplies = localStorage.getItem('selectedSuppliesDraft');
+    if (savedSupplies) {
+      setSelectedSupplies(JSON.parse(savedSupplies));
+      setDraftSaved(true);
+    }
+  }, []);
 
   const [showRecipientSuggestions, setShowRecipientSuggestions] = useState(false);
   const [filteredRecipients, setFilteredRecipients] = useState([]);
@@ -390,88 +407,7 @@ export function ReleaseSupply() {
     }
   };
 
-  const handleEditRelease = async (e) => {
-    e.preventDefault();
-    setLoading(true);
 
-    try {
-      // Log the release being edited
-      console.log('Attempting to edit release:', editingRelease);
-
-      // Find the release in the releases array to get the correct document ID
-      const releaseToUpdate = releases.find(r => r.id === editingRelease.id);
-      
-      if (!releaseToUpdate) {
-        console.error('Release not found:', editingRelease);
-        toast.error("Could not find the release to update");
-        setLoading(false);
-        return;
-      }
-
-      // Get the document reference using the Firestore document ID
-      const releaseRef = doc(db, "releases", releaseToUpdate.docId);
-
-      // Prepare update data
-      const updateData = {
-        receivedBy: editingRelease.receivedBy.trim(),
-        department: editingRelease.department.trim(),
-        purpose: editingRelease.purpose.trim(),
-        updatedAt: Timestamp.now()
-      };
-
-      // Handle date/time update
-      if (editingRelease.customDate && editingRelease.customTime) {
-        try {
-          const [hours, minutes] = editingRelease.customTime.split(':');
-          const newDate = new Date(editingRelease.customDate);
-          newDate.setHours(parseInt(hours), parseInt(minutes), 0, 0);
-          
-          if (isNaN(newDate.getTime())) {
-            throw new Error("Invalid date format");
-          }
-          
-          updateData.createdAt = Timestamp.fromDate(newDate);
-        } catch (error) {
-          console.error("Date parsing error:", error);
-          toast.error("Invalid date or time format");
-          setLoading(false);
-          return;
-        }
-      }
-
-      // Log update attempt
-      console.log('Attempting to update release:', {
-        customId: editingRelease.id,
-        firestoreId: releaseToUpdate.docId,
-        updateData
-      });
-
-      // Perform the update
-      await updateDoc(releaseRef, updateData);
-
-      // Close the modal and reset state
-      setEditDialogOpen(false);
-      setEditingRelease(null);
-      
-      // Show success message
-      toast.success("Release updated successfully", {
-        duration: 3000
-      });
-    } catch (error) {
-      console.error("Error updating release:", error);
-      
-      // More specific error messages
-      if (error.code === 'not-found') {
-        toast.error("Release document not found");
-      } else if (error.code === 'permission-denied') {
-        toast.error("You don't have permission to update this release");
-      } else {
-        toast.error(error.message || "Failed to update release");
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
 
   return (
     <motion.div
@@ -784,31 +720,94 @@ export function ReleaseSupply() {
                       </span>
                     )}
                   </div>
-                  <div className="flex gap-3">
+                  <div className="flex items-center gap-3">
+                    {draftSaved && (
+                      <div className="flex items-center text-sm text-gray-600 dark:text-gray-400 mr-auto">
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="16"
+                          height="16"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          className="mr-1"
+                        >
+                          <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+                          <polyline points="17 21 17 13 7 13 7 21"/>
+                          <polyline points="7 3 7 8 15 8"/>
+                        </svg>
+                        Draft saved
+                      </div>
+                    )}
                     <Button
                       type="button"
                       variant="outline"
-                      onClick={() => setDialogOpen(false)}
-                      className="px-4"
+                      onClick={() => {
+                        // Clear drafts
+                        localStorage.removeItem('releaseSupplyDraft');
+                        localStorage.removeItem('selectedSuppliesDraft');
+                        setDraftSaved(false);
+                        // Reset form
+                        setNewRelease({
+                          receivedBy: "",
+                          department: "",
+                          purpose: ""
+                        });
+                        setSelectedSupplies([]);
+                        setDialogOpen(false);
+                      }}
                     >
                       Cancel
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        // Save current state to localStorage
+                        localStorage.setItem('releaseSupplyDraft', JSON.stringify(newRelease));
+                        localStorage.setItem('selectedSuppliesDraft', JSON.stringify(selectedSupplies));
+                        setDraftSaved(true);
+                        setDialogOpen(false);
+                        toast.success("Draft saved successfully");
+                      }}
+                      className="flex items-center gap-2"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+                        <polyline points="17 21 17 13 7 13 7 21"/>
+                        <polyline points="7 3 7 8 15 8"/>
+                      </svg>
+                      Save as Draft
                     </Button>
                     <Button
                       type="submit"
                       onClick={handleAddRelease}
                       disabled={loading || selectedSupplies.length === 0}
-                      className="bg-black hover:bg-gray-800 text-white dark:bg-white dark:hover:bg-gray-100 dark:text-black px-4 transition-colors disabled:opacity-50"
+                      className="bg-black hover:bg-gray-800 text-white dark:bg-white dark:hover:bg-gray-100 dark:text-black transition-colors disabled:opacity-50 flex items-center gap-2"
                     >
                       {loading ? (
-                        <div className="flex items-center gap-2">
+                        <>
                           <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
                           Releasing...
-                        </div>
+                        </>
                       ) : (
-                        <div className="flex items-center gap-2">
+                        <>
                           <Share2 className="w-4 h-4" />
                           Release
-                        </div>
+                        </>
                       )}
                     </Button>
                   </div>
@@ -1111,174 +1110,31 @@ export function ReleaseSupply() {
                         {release.createdAt?.toDate().toLocaleString()}
                       </TableCell>
                       <TableCell className="py-3 text-sm">
-                                                <Dialog open={editDialogOpen} onOpenChange={(open) => {
-                            setEditDialogOpen(open);
-                            if (!open) setEditingRelease(null);
-                          }}>
-                          <DialogTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="gap-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
-                              onClick={() => {
-                                const releaseDate = release.createdAt?.toDate();
-                                setEditDialogOpen(true);
-                                
-                                // Log for debugging
-                                console.log('Opening edit modal for release:', {
-                                  id: release.id,
-                                  docId: release.docId,
-                                  release
-                                });
-
-                                // Create a copy of the release for editing
-                                setEditingRelease({
-                                  ...release,
-                                  customDate: releaseDate ? format(releaseDate, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'),
-                                  customTime: releaseDate ? format(releaseDate, 'HH:mm') : format(new Date(), 'HH:mm')
-                                });
-                              }}
-                            >
-                              <Edit className="w-4 h-4" />
-                              Edit
-                            </Button>
-                          </DialogTrigger>
-                          <DialogContent className="sm:max-w-[500px]">
-                            <DialogHeader>
-                              <DialogTitle className="text-xl font-semibold">Edit Release</DialogTitle>
-                              <DialogDescription className="text-gray-600 dark:text-gray-400">
-                                Update release information
-                              </DialogDescription>
-                            </DialogHeader>
-                            
-                            <form onSubmit={handleEditRelease} className="space-y-6 py-4">
-                              {/* Supply Info */}
-                              <div className="space-y-4">
-                                <div className="grid grid-cols-2 gap-4">
-                                  <div className="space-y-2">
-                                    <label className="text-sm font-medium">Supply Name</label>
-                                    <Input
-                                      value={editingRelease?.supplyName || ""}
-                                      disabled
-                                      className="bg-gray-50 dark:bg-gray-800"
-                                    />
-                                  </div>
-                                  <div className="space-y-2">
-                                    <label className="text-sm font-medium">Quantity</label>
-                                    <Input
-                                      value={editingRelease?.quantity || ""}
-                                      disabled
-                                      className="bg-gray-50 dark:bg-gray-800"
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* Recipient Info */}
-                              <div className="space-y-4">
-                                <div className="grid grid-cols-2 gap-4">
-                                  <div className="space-y-2">
-                                    <label className="text-sm font-medium">Received By</label>
-                                    <Input
-                                      required
-                                      value={editingRelease?.receivedBy || ""}
-                                      onChange={(e) => setEditingRelease(prev => ({ ...prev, receivedBy: e.target.value }))}
-                                      placeholder="Recipient name"
-                                    />
-                                  </div>
-                                  <div className="space-y-2">
-                                    <label className="text-sm font-medium">Department</label>
-                                    <Input
-                                      required
-                                      value={editingRelease?.department || ""}
-                                      onChange={(e) => setEditingRelease(prev => ({ ...prev, department: e.target.value }))}
-                                      placeholder="Department"
-                                    />
-                                  </div>
-                                </div>
-                                <div className="space-y-2">
-                                  <label className="text-sm font-medium">Purpose</label>
-                                  <Input
-                                    required
-                                    value={editingRelease?.purpose || ""}
-                                    onChange={(e) => setEditingRelease(prev => ({ ...prev, purpose: e.target.value }))}
-                                    placeholder="Purpose of release"
-                                  />
-                                </div>
-                              </div>
-
-                              {/* Date & Time */}
-                              <div className="space-y-4">
-                                <div className="grid grid-cols-2 gap-4">
-                                  <div className="space-y-2">
-                                    <label className="text-sm font-medium">Date</label>
-                                    <Popover open={editDatePickerOpen} onOpenChange={setEditDatePickerOpen}>
-                                      <PopoverTrigger asChild>
-                                        <Button
-                                          variant="outline"
-                                          className="w-full justify-start text-left font-normal"
-                                        >
-                                          <Calendar className="mr-2 h-4 w-4" />
-                                          {editingRelease?.customDate ? format(new Date(editingRelease.customDate), 'MMM dd, yyyy') : 'Select date'}
-                                        </Button>
-                                      </PopoverTrigger>
-                                      <PopoverContent className="w-auto p-0" align="start">
-                                        <CalendarComponent
-                                          mode="single"
-                                          selected={editingRelease?.customDate ? new Date(editingRelease.customDate) : undefined}
-                                          onSelect={(date) => {
-                                            setEditingRelease(prev => ({
-                                              ...prev,
-                                              customDate: date ? format(date, 'yyyy-MM-dd') : null
-                                            }));
-                                            setEditDatePickerOpen(false);
-                                          }}
-                                          initialFocus
-                                        />
-                                      </PopoverContent>
-                                    </Popover>
-                                  </div>
-                                  <div className="space-y-2">
-                                    <label className="text-sm font-medium">Time</label>
-                                    <Input
-                                      type="time"
-                                      value={editingRelease?.customTime || ""}
-                                      onChange={(e) => setEditingRelease(prev => ({ ...prev, customTime: e.target.value }))}
-                                    />
-                                  </div>
-                                </div>
-                                <div className="text-xs text-gray-500 dark:text-gray-400">
-                                  Current: {editingRelease?.createdAt?.toDate().toLocaleString()}
-                                </div>
-                              </div>
-
-                              <div className="flex justify-end gap-3 pt-4">
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  onClick={() => setEditDialogOpen(false)}
-                                >
-                                  Cancel
-                                </Button>
-                                <Button
-                                  type="submit"
-                                  onClick={handleEditRelease}
-                                  disabled={loading}
-                                  className="bg-black hover:bg-gray-800 text-white dark:bg-white dark:hover:bg-gray-100 dark:text-black"
-                                >
-                                  {loading ? (
-                                    <div className="flex items-center gap-2">
-                                      <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                                      Updating...
-                                    </div>
-                                  ) : (
-                                    "Update Release"
-                                  )}
-                                </Button>
-                              </div>
-                            </form>
-                          </DialogContent>
-                        </Dialog>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 px-3 bg-black text-white hover:bg-gray-800 hover:text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 dark:hover:text-black transition-colors flex items-center gap-2"
+                          onClick={() => {
+                            setSelectedRelease(release);
+                            setEditDialogOpen(true);
+                          }}
+                        >
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            width="14"
+                            height="14"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
+                            <path d="m15 5 4 4"/>
+                          </svg>
+                          Edit
+                        </Button>
                       </TableCell>
                     </motion.tr>
                   ))}
@@ -1345,6 +1201,182 @@ export function ReleaseSupply() {
           )}
         </div>
       </div>
+
+      {/* Edit Modal */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <div className="flex items-center gap-2">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="text-gray-600 dark:text-gray-400"
+              >
+                <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
+                <path d="m15 5 4 4"/>
+              </svg>
+              <DialogTitle className="text-xl font-semibold">Edit Release Details</DialogTitle>
+            </div>
+          </DialogHeader>
+
+          <div className="space-y-6 py-4">
+            {/* Non-editable fields */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Release ID</label>
+                <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-md">
+                  <p className="text-sm font-mono">{selectedRelease?.id}</p>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Supply Name</label>
+                <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-md">
+                  <p className="text-sm font-medium">{selectedRelease?.supplyName}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Editable fields */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">
+                  Received By
+                </label>
+                <Input
+                  value={selectedRelease?.receivedBy || ""}
+                  onChange={(e) => setSelectedRelease(prev => ({ ...prev, receivedBy: e.target.value }))}
+                  placeholder="Enter recipient name"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">
+                  Department
+                </label>
+                <Input
+                  value={selectedRelease?.department || ""}
+                  onChange={(e) => setSelectedRelease(prev => ({ ...prev, department: e.target.value }))}
+                  placeholder="Enter department"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">
+                Purpose
+              </label>
+              <Input
+                value={selectedRelease?.purpose || ""}
+                onChange={(e) => setSelectedRelease(prev => ({ ...prev, purpose: e.target.value }))}
+                placeholder="Enter purpose"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">
+                  Date Released
+                </label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className="w-full justify-start text-left font-normal"
+                    >
+                      <Calendar className="mr-2 h-4 w-4" />
+                      {selectedRelease?.createdAt ? format(selectedRelease.createdAt.toDate(), 'PPP') : "Pick a date"}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0">
+                    <CalendarComponent
+                      mode="single"
+                      selected={selectedRelease?.createdAt?.toDate()}
+                      onSelect={(date) => {
+                        const currentTime = selectedRelease?.createdAt?.toDate() || new Date();
+                        const newDate = new Date(date);
+                        newDate.setHours(currentTime.getHours());
+                        newDate.setMinutes(currentTime.getMinutes());
+                        setSelectedRelease(prev => ({
+                          ...prev,
+                          createdAt: Timestamp.fromDate(newDate)
+                        }));
+                      }}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">
+                  Time Released
+                </label>
+                <Input
+                  type="time"
+                  value={selectedRelease?.createdAt ? 
+                    format(selectedRelease.createdAt.toDate(), 'HH:mm') : 
+                    ''
+                  }
+                  onChange={(e) => {
+                    const [hours, minutes] = e.target.value.split(':');
+                    const currentDate = selectedRelease?.createdAt?.toDate() || new Date();
+                    const newDate = new Date(currentDate);
+                    newDate.setHours(parseInt(hours));
+                    newDate.setMinutes(parseInt(minutes));
+                    setSelectedRelease(prev => ({
+                      ...prev,
+                      createdAt: Timestamp.fromDate(newDate)
+                    }));
+                  }}
+                  className="font-mono"
+                />
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-3">
+            <Button
+              variant="outline"
+              onClick={() => setEditDialogOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={async () => {
+                try {
+                  const releaseRef = doc(db, "releases", selectedRelease.docId);
+                  await updateDoc(releaseRef, {
+                    receivedBy: selectedRelease.receivedBy,
+                    department: selectedRelease.department,
+                    purpose: selectedRelease.purpose,
+                    createdAt: selectedRelease.createdAt,
+                    updatedAt: Timestamp.now()
+                  });
+                  
+                  setEditDialogOpen(false);
+                  toast.success("Release updated successfully");
+                  
+                  // Update the local state
+                  setFilteredReleases(prev => prev.map(release => 
+                    release.docId === selectedRelease.docId ? selectedRelease : release
+                  ));
+                } catch (error) {
+                  console.error("Error updating release:", error);
+                  toast.error("Failed to update release");
+                }
+              }}
+              className="bg-black hover:bg-gray-800 text-white dark:bg-white dark:hover:bg-gray-100 dark:text-black transition-colors"
+            >
+              Save changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </motion.div>
   );
 } 
