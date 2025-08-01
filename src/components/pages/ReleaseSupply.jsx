@@ -317,7 +317,7 @@ export function ReleaseSupply() {
           const releaseQuantity = parseInt(selectedSupply.quantity);
 
           console.log('Availability check:', {
-            currentQuanty,
+            currentQuantity,
             currentAvailability,
             releaseQuantity,
             supplyName: selectedSupply.supplyName
