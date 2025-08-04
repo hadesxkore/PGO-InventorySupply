@@ -39,8 +39,8 @@ export function ReleaseProvider({ children }) {
     const releasesQuery = query(collection(db, "releases"), orderBy("createdAt", "desc"));
     const unsubscribeReleases = onSnapshot(releasesQuery, (snapshot) => {
       const releasesData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
+        docId: doc.id, // Firestore document ID
+        ...doc.data() // This includes the custom 'id' field (RLS-XXXXX)
       }));
       console.log('ReleaseContext: Received releases data:', releasesData.length, 'items');
       setReleases(releasesData);
@@ -50,9 +50,16 @@ export function ReleaseProvider({ children }) {
       const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
       const uniqueRecipients = new Set(releasesData.map(r => r.receivedBy)).size;
       
+      // Calculate total quantity released today
+      const todayReleases = releasesData.filter(d => d.createdAt?.toDate().getTime() >= today);
+      const totalQuantityToday = todayReleases.reduce((sum, release) => sum + (parseInt(release.quantity) || 0), 0);
+      
+      // Calculate total quantity of all releases
+      const totalQuantityAll = releasesData.reduce((sum, release) => sum + (parseInt(release.quantity) || 0), 0);
+      
       setStats({
-        totalReleases: releasesData.length,
-        todayReleases: releasesData.filter(d => d.createdAt?.toDate().getTime() >= today).length,
+        totalReleases: totalQuantityAll, // Now shows total quantity, not count
+        todayReleases: totalQuantityToday, // Now shows total quantity, not count
         uniqueRecipients
       });
 
