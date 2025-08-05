@@ -44,7 +44,7 @@ export function Reports() {
   const [sortOrder, setSortOrder] = useState('asc');
   const [selectedCluster, setSelectedCluster] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
-  const itemsPerPage = 20;
+  const itemsPerPage = 15; // Changed to match the table's visible rows
 
   // Debug logs
   console.log('Reports Context Data:', { reportsData, isLoading, dateRange });
@@ -625,11 +625,11 @@ export function Reports() {
           ) : (
             <>
               <div className="overflow-x-auto">
-                <Table>
+                <Table maxHeight="calc(15 * 2.5rem)">
                   <TableHeader>
                     <TableRow>
                       {Object.keys(getCurrentReportData()[0] || {}).map((header) => (
-                        <TableHead key={header}>
+                        <TableHead key={header} className="bg-white dark:bg-gray-800">
                           {header}
                         </TableHead>
                       ))}
@@ -637,7 +637,7 @@ export function Reports() {
                   </TableHeader>
                   <TableBody>
                     {getSortedAndPaginatedData().data.map((row, index) => (
-                      <TableRow key={index}>
+                      <TableRow key={index} isEven={index % 2 === 0}>
                         {Object.values(row).map((value, i) => (
                           <TableCell key={i}>
                             {value?.toString() || '-'}
