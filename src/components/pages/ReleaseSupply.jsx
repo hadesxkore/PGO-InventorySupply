@@ -1168,7 +1168,12 @@ export function ReleaseSupply() {
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -20 }}
                       transition={{ duration: 0.2, delay: index * 0.05 }}
-                      className="border-b border-gray-200 dark:border-gray-700"
+                      className={cn(
+                        "border-b border-gray-200 dark:border-gray-700",
+                        index % 2 === 0 
+                          ? "bg-white dark:bg-gray-800" 
+                          : "bg-gray-50 dark:bg-gray-800/50"
+                      )}
                     >
                       <TableCell className="py-3 text-sm font-mono">
                         {release.id} {/* This is the RLS-XXXXX format ID */}
