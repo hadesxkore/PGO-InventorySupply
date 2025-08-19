@@ -84,20 +84,28 @@ import {
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
 import { Filter } from "lucide-react";
-import { useSupplies } from "../../lib/SuppliesContext";
+import useSuppliesStore from "../../lib/store/useSuppliesStore";
 import { Label } from "../ui/label";
 import { Progress } from "../ui/progress";
 
 export function SuppliesStock() {
   const { 
-    allSupplies, 
-    units, 
-    classifications, 
-    isLoading: isContextLoading,
-    updateSupplyOptimized,
-    deleteSupplyOptimized,
-    addSupplyOptimized
-  } = useSupplies();
+    supplies,
+    units,
+    classifications,
+    loading: storeLoading,
+    fetchSupplies,
+    fetchUnits,
+    fetchClassifications,
+    addSupply,
+    updateSupply,
+    deleteSupply,
+    addUnit,
+    addClassification,
+    searchSupplies: searchSuppliesStore,
+    filterByStock,
+    sortSupplies
+  } = useSuppliesStore();
   const [filteredSupplies, setFilteredSupplies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
@@ -197,18 +205,25 @@ export function SuppliesStock() {
     classification.name.toLowerCase().includes(classificationSearchQuery.toLowerCase())
   );
 
-  // Debug logs
-  console.log('Context Data:', { allSupplies, units, classifications, isContextLoading });
-  console.log('Component State:', { filteredSupplies, loading, currentPage });
-
-  // Initialize filteredSupplies when allSupplies changes
+  // Initialize data
   useEffect(() => {
-    console.log('allSupplies changed:', allSupplies);
-    if (allSupplies && allSupplies.length > 0) {
-      setFilteredSupplies(allSupplies);
+    const initializeData = async () => {
+      await Promise.all([
+        fetchSupplies(),
+        fetchUnits(),
+        fetchClassifications()
+      ]);
       setLoading(false);
+    };
+    initializeData();
+  }, [fetchSupplies, fetchUnits, fetchClassifications]);
+
+  // Update filtered supplies when supplies change
+  useEffect(() => {
+    if (supplies && supplies.length > 0) {
+      setFilteredSupplies(supplies);
     }
-  }, [allSupplies]);
+  }, [supplies]);
 
   // Calculate pagination values
   const totalPages = Math.ceil(filteredSupplies.length / itemsPerPage);
@@ -223,17 +238,17 @@ export function SuppliesStock() {
 
   // Modified search and sort effect
   useEffect(() => {
-    console.log('Applying filters:', { searchTerm, selectedDate, stockFilter, sortField, sortOrder });
-    let filtered = allSupplies;
+    let filtered = [...supplies]; // Create a copy to avoid mutating the original
 
+    // Apply search
     if (searchTerm.trim()) {
-      const searchLower = searchTerm.toLowerCase();
       filtered = filtered.filter(supply => 
-        supply.id.toLowerCase().includes(searchLower) || 
-        supply.name.toLowerCase().includes(searchLower)
+        supply.id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        supply.name?.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
 
+    // Apply date filter
     if (selectedDate) {
       const startOfDay = new Date(selectedDate);
       startOfDay.setHours(0, 0, 0, 0);
@@ -259,12 +274,11 @@ export function SuppliesStock() {
     }
 
     // Apply sort
-    filtered = [...filtered].sort((a, b) => {
+    filtered.sort((a, b) => {
       let compareA, compareB;
       
       switch (sortField) {
         case 'id':
-          // Extract the numeric part for ID comparison
           compareA = parseInt(a.id.split('-')[1]);
           compareB = parseInt(b.id.split('-')[1]);
           break;
@@ -293,17 +307,14 @@ export function SuppliesStock() {
           compareB = b[sortField];
       }
 
-      if (sortOrder === 'asc') {
-        return compareA > compareB ? 1 : -1;
-      } else {
-        return compareA < compareB ? 1 : -1;
-      }
+      return sortOrder === 'asc' 
+        ? (compareA > compareB ? 1 : -1)
+        : (compareA < compareB ? 1 : -1);
     });
     
-    console.log('Filtered and sorted results:', filtered.length);
     setFilteredSupplies(filtered);
     setCurrentPage(1); // Reset to first page when filters change
-  }, [searchTerm, selectedDate, stockFilter, allSupplies, sortField, sortOrder]);
+  }, [searchTerm, selectedDate, stockFilter, supplies, sortField, sortOrder]);
 
   // Render load more button
   const renderLoadMore = () => {
@@ -330,14 +341,12 @@ export function SuppliesStock() {
     }
 
     try {
-      await addDoc(collection(db, "units"), {
-        name: newUnit.trim()
-      });
+      await addUnit(newUnit.trim());
       setNewUnit("");
       setNewUnitDialogOpen(false);
       toast.success("Unit added successfully");
     } catch (error) {
-      console.error("Error adding unit:", error);
+      // Error handled by toast
       toast.error("Failed to add unit");
     }
   };
@@ -350,12 +359,12 @@ export function SuppliesStock() {
     }
 
     try {
-      await addClassification(newClassification);
+      await addClassification(newClassification.trim());
       setNewClassification("");
       setNewClassificationDialogOpen(false);
       toast.success("Classification added successfully");
     } catch (error) {
-      console.error("Error adding classification:", error);
+      // Error handled by toast
       toast.error("Failed to add classification");
     }
   };
@@ -370,7 +379,7 @@ export function SuppliesStock() {
         imageUrl = await uploadImage(selectedImage);
       }
 
-      await addSupplyOptimized({
+      await addSupply({
         ...newSupply,
         image: imageUrl,
         quantity: parseInt(newSupply.quantity),
@@ -389,7 +398,7 @@ export function SuppliesStock() {
       setSelectedImage(null);
       toast.success("Supply added successfully");
     } catch (error) {
-      console.error("Error adding supply:", error);
+      // Error handled by toast
       toast.error("Failed to add supply");
     } finally {
       setLoading(false);
@@ -426,7 +435,10 @@ export function SuppliesStock() {
       }
 
       // Calculate the quantity difference
-      const currentSupply = allSupplies.find(s => s.docId === editSupply.docId);
+      const currentSupply = supplies.find(s => s.docId === editSupply.docId);
+      if (!currentSupply) {
+        throw new Error("Supply not found");
+      }
       const quantityDifference = parseInt(editSupply.quantity) - currentSupply.quantity;
       
       // Calculate new availability by adding the quantity difference to current availability
@@ -441,13 +453,13 @@ export function SuppliesStock() {
       };
 
       // Pass the docId for updating the correct document
-      await updateSupplyOptimized(editSupply.id, updatedData, editSupply.docId);
+      await updateSupply(editSupply.docId, updatedData);
 
       setEditDialogOpen(false);
       setSelectedImage(null);
       toast.success("Supply updated successfully");
     } catch (error) {
-      console.error("Error updating supply:", error);
+      // Error handled by toast
       toast.error("Failed to update supply");
     } finally {
       setLoading(false);
@@ -458,12 +470,12 @@ export function SuppliesStock() {
     if (!selectedSupply) return;
 
     try {
-      await deleteSupplyOptimized(selectedSupply.id);
+      await deleteSupply(selectedSupply.docId);
       setDeleteDialogOpen(false);
       setSelectedSupply(null);
       toast.success("Supply deleted successfully");
     } catch (error) {
-      console.error("Error deleting supply:", error);
+      // Error handled by toast
       toast.error("Failed to delete supply");
     }
   };
@@ -490,7 +502,7 @@ export function SuppliesStock() {
           const trimmedName = itemName.trim();
           
           // Check if item already exists
-          const existingItems = allSupplies.filter(supply => 
+          const existingItems = supplies.filter(supply => 
             supply.name.toLowerCase() === trimmedName.toLowerCase() &&
             supply.classification?.toLowerCase() === (newSupply.classification || '').toLowerCase()
           );
@@ -507,7 +519,7 @@ export function SuppliesStock() {
               });
               importCount++;
             } catch (error) {
-              console.error("Error adding item:", trimmedName, error);
+              // Error handled in the outer catch block
             }
           }
         }
@@ -520,7 +532,7 @@ export function SuppliesStock() {
         toast.info("No new items were imported (items may already exist)");
       }
     } catch (error) {
-      console.error("Error importing Excel:", error);
+      // Error handled by toast
       toast.error("Failed to import Excel data: " + error.message);
     } finally {
       setLoading(false);
@@ -1017,7 +1029,7 @@ export function SuppliesStock() {
               <div>
                 <h3 className="text-sm font-medium text-gray-600 dark:text-gray-400">Total Items</h3>
                 <p className="text-2xl font-bold mt-4 text-gray-800 dark:text-white">
-                  {allSupplies.length}
+                  {supplies.length}
                 </p>
               </div>
               <div className="bg-blue-100 dark:bg-blue-900/50 p-3 rounded-full">
@@ -1037,7 +1049,7 @@ export function SuppliesStock() {
               <div>
                 <h3 className="text-sm font-medium text-gray-600 dark:text-gray-400">Low Stock Items</h3>
                 <p className="text-2xl font-bold mt-4 text-gray-800 dark:text-white">
-                  {allSupplies.filter(s => s.quantity < 10).length}
+                  {supplies.filter(s => s.quantity < 10).length}
                 </p>
               </div>
               <div className="bg-yellow-100 dark:bg-yellow-900/50 p-3 rounded-full">
@@ -1057,7 +1069,7 @@ export function SuppliesStock() {
               <div>
                 <h3 className="text-sm font-medium text-gray-600 dark:text-gray-400">Out of Stock</h3>
                 <p className="text-2xl font-bold mt-4 text-gray-800 dark:text-white">
-                  {allSupplies.filter(s => s.quantity === 0).length}
+                  {supplies.filter(s => s.quantity === 0).length}
                 </p>
               </div>
               <div className="bg-red-100 dark:bg-red-900/50 p-3 rounded-full">
@@ -1369,7 +1381,7 @@ export function SuppliesStock() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {loading || isContextLoading ? (
+                  {loading || storeLoading ? (
                     Array(5).fill(null).map((_, index) => (
                       <TableRow key={`loading-${index}`}>
                         <TableCell><Skeleton className="h-6 w-16" /></TableCell>

@@ -46,22 +46,12 @@ export function Reports() {
   const [searchTerm, setSearchTerm] = useState('');
   const itemsPerPage = 15; // Changed to match the table's visible rows
 
-  // Debug logs
-  console.log('Reports Context Data:', { reportsData, isLoading, dateRange });
-  console.log('Reports Component State:', { 
-    reportType, 
-    currentPage, 
-    sortField, 
-    sortOrder, 
-    selectedCluster, 
-    searchTerm,
-    currentData: reportsData[reportType] || []
-  });
+
 
   // Get current report data based on type
   const getCurrentReportData = () => {
     const data = reportsData[reportType] || [];
-    console.log(`Current ${reportType} data:`, data.length, 'items');
+
     return data;
   };
 
@@ -79,12 +69,7 @@ export function Reports() {
       return matchesSearch && matchesCluster;
     });
     
-    console.log('Filtered data:', {
-      before: currentData.length,
-      after: filtered.length,
-      searchTerm,
-      selectedCluster
-    });
+
 
     return filtered;
   };
@@ -179,7 +164,7 @@ export function Reports() {
       XLSX.writeFile(workbook, fileName);
       toast.success('Excel report generated successfully');
     } catch (error) {
-      console.error('Error generating Excel:', error);
+      // Error handled by toast
       toast.error('Failed to generate Excel report');
     }
   };
@@ -308,7 +293,7 @@ export function Reports() {
       doc.save(fileName);
       toast.success('PDF report generated successfully');
     } catch (error) {
-      console.error('Error generating PDF:', error);
+      // Error handled by toast
       toast.error('Failed to generate PDF report');
     }
   };

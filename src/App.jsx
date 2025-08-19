@@ -16,97 +16,111 @@ import { GenerateExport } from "./components/pages/GenerateExport";
 import { DeliveryPage } from "./components/pages/DeliveryPage";
 import { Reports } from "./components/pages/Reports";
 import { Account } from "./components/pages/Account";
+import { IctInventory } from "./components/pages/IctInventory";
+import { IctInventoryProvider } from "./lib/IctInventoryContext";
 
 function App() {
   return (
-      <Router>
+    <Router>
       <ThemeProvider defaultTheme="light" storageKey="vite-ui-theme">
         <AuthProvider>
           <SuppliesProvider>
             <ReleaseProvider>
-              <ReportsProvider>
-          <Routes>
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/signup" element={<SignUpPage />} />
-            <Route
-              path="/dashboard"
-              element={
-                <ProtectedRoute>
-                  <DashboardLayout>
-                    <Dashboard />
-                  </DashboardLayout>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/delivery"
-              element={
-                <ProtectedRoute>
-                  <DashboardLayout>
-                    <DeliveryPage />
-                  </DashboardLayout>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/supplies"
-              element={
-                <ProtectedRoute>
-                  <DashboardLayout>
-                    <SuppliesStock />
-                  </DashboardLayout>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/release-supply"
-              element={
-                <ProtectedRoute>
-                  <DashboardLayout>
-                    <ReleaseSupply />
-                  </DashboardLayout>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/generate-export"
-              element={
-                <ProtectedRoute>
-                  <DashboardLayout>
-                    <GenerateExport />
-                  </DashboardLayout>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/reports"
-              element={
-                <ProtectedRoute>
-                  <DashboardLayout>
-                    <Reports />
-                  </DashboardLayout>
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/account"
-              element={
-                <ProtectedRoute>
-                  <DashboardLayout>
-                    <Account />
-                  </DashboardLayout>
-                </ProtectedRoute>
-              }
-            />
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          </Routes>
-                <Toaster />
-              </ReportsProvider>
+              <IctInventoryProvider>
+                <ReportsProvider>
+                  <Routes>
+                    <Route path="/login" element={<LoginPage />} />
+                    <Route path="/signup" element={<SignUpPage />} />
+                    <Route
+                      path="/dashboard"
+                      element={
+                        <ProtectedRoute>
+                          <DashboardLayout>
+                            <Dashboard />
+                          </DashboardLayout>
+                        </ProtectedRoute>
+                      }
+                    />
+                    <Route
+                      path="/delivery"
+                      element={
+                        <ProtectedRoute>
+                          <DashboardLayout>
+                            <DeliveryPage />
+                          </DashboardLayout>
+                        </ProtectedRoute>
+                      }
+                    />
+                    <Route
+                      path="/supplies"
+                      element={
+                        <ProtectedRoute>
+                          <DashboardLayout>
+                            <SuppliesStock />
+                          </DashboardLayout>
+                        </ProtectedRoute>
+                      }
+                    />
+                    <Route
+                      path="/release-supply"
+                      element={
+                        <ProtectedRoute>
+                          <DashboardLayout>
+                            <ReleaseSupply />
+                          </DashboardLayout>
+                        </ProtectedRoute>
+                      }
+                    />
+                    <Route
+                      path="/generate-export"
+                      element={
+                        <ProtectedRoute>
+                          <DashboardLayout>
+                            <GenerateExport />
+                          </DashboardLayout>
+                        </ProtectedRoute>
+                      }
+                    />
+                    <Route
+                      path="/ict-inventory"
+                      element={
+                        <ProtectedRoute>
+                          <DashboardLayout>
+                            <IctInventory />
+                          </DashboardLayout>
+                        </ProtectedRoute>
+                      }
+                    />
+                    <Route
+                      path="/reports"
+                      element={
+                        <ProtectedRoute>
+                          <DashboardLayout>
+                            <Reports />
+                          </DashboardLayout>
+                        </ProtectedRoute>
+                      }
+                    />
+                    <Route
+                      path="/account"
+                      element={
+                        <ProtectedRoute>
+                          <DashboardLayout>
+                            <Account />
+                          </DashboardLayout>
+                        </ProtectedRoute>
+                      }
+                    />
+                    <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                  </Routes>
+                  <Toaster />
+                </ReportsProvider>
+              </IctInventoryProvider>
             </ReleaseProvider>
           </SuppliesProvider>
         </AuthProvider>
       </ThemeProvider>
-      </Router>
+    </Router>
   );
 }
 

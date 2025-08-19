@@ -172,11 +172,11 @@ export function ReleaseSupply() {
       });
       
       if (releasesToUpdate.length === 0) {
-        console.log('No releases need classification updates');
+        // No releases need classification updates
         return;
       }
 
-      console.log(`Updating classifications for ${releasesToUpdate.length} releases`);
+      // Updating classifications for releases
 
       for (const release of releasesToUpdate) {
         const supply = supplies.find(s => s.id === release.supplyId);
@@ -184,14 +184,14 @@ export function ReleaseSupply() {
         await updateDoc(releaseRef, {
           classification: supply.classification
         });
-        console.log(`Updated classification for release ${release.id} to ${supply.classification}`);
+        // Classification updated successfully
       }
 
       if (releasesToUpdate.length > 0) {
         toast.success(`Updated classifications for ${releasesToUpdate.length} releases`);
       }
     } catch (error) {
-      console.error('Error updating release classifications:', error);
+      // Error handled by toast
       toast.error('Failed to update release classifications');
     }
   };
@@ -210,12 +210,7 @@ export function ReleaseSupply() {
     }
   }, [isContextLoading, supplies.length, releases.length]);
 
-  // Debug logs
-  console.log('ReleaseSupply Component:', {
-    contextData: { releasesCount: releases.length, suppliesCount: supplies.length, stats },
-    filteredData: filteredReleases.length,
-    loading: isContextLoading
-  });
+
 
   // Initialize filteredReleases when releases changes
   useEffect(() => {
@@ -315,7 +310,7 @@ export function ReleaseSupply() {
       }
     });
 
-    console.log('Filtered results:', filtered.length);
+
     setFilteredReleases(filtered);
   }, [searchTerm, releases, selectedDate, sortField, sortOrder]);
 
@@ -335,8 +330,7 @@ export function ReleaseSupply() {
     }
 
     try {
-      console.log('Starting release process with supplies:', selectedSupplies);
-      console.log('Available supplies from context:', supplies.map(s => ({ id: s.id, name: s.name })));
+
       
       // Start a Firestore transaction
       await runTransaction(db, async (transaction) => {
@@ -353,10 +347,7 @@ export function ReleaseSupply() {
 
         // Read all supply documents first using queries instead of direct references
         const supplyQueries = selectedSupplies.map(supply => {
-          console.log('Creating query for supply:', {
-            supplyId: supply.supplyId,
-            supplyName: supply.supplyName
-          });
+
           return query(collection(db, "supplies"), where("id", "==", supply.supplyId));
         });
         
@@ -376,13 +367,7 @@ export function ReleaseSupply() {
           const selectedSupply = selectedSupplies[i];
           const supplyDoc = supplyDocs[i];
 
-          console.log(`Processing supply ${i + 1}:`, {
-            supplyId: selectedSupply.supplyId,
-            supplyName: selectedSupply.supplyName,
-            docExists: supplyDoc !== null,
-            docData: supplyDoc ? supplyDoc.data() : null,
-            docId: supplyDoc ? supplyDoc.id : null
-          });
+
 
           if (!supplyDoc) {
             throw new Error(`Supply "${selectedSupply.supplyName}" (ID: ${selectedSupply.supplyId}) not found in database!`);
@@ -395,12 +380,7 @@ export function ReleaseSupply() {
           const currentAvailability = supplyData.availability ?? currentQuantity;
           const releaseQuantity = parseInt(selectedSupply.quantity);
 
-          console.log('Availability check:', {
-            currentQuantity,
-            currentAvailability,
-            releaseQuantity,
-            supplyName: selectedSupply.supplyName
-          });
+
 
           if (releaseQuantity > currentAvailability) {
             throw new Error(`Not enough quantity available for "${selectedSupply.supplyName}"! Available: ${currentAvailability}, Requested: ${releaseQuantity}`);
@@ -440,10 +420,7 @@ export function ReleaseSupply() {
           });
         }
 
-        console.log('Performing updates:', {
-          supplyUpdates: supplyUpdates.length,
-          releaseData: releaseData.length
-        });
+
 
         // Now perform all writes
         for (const update of supplyUpdates) {
@@ -465,7 +442,7 @@ export function ReleaseSupply() {
       setSelectedSupplies([]);
       toast.success(`${selectedSupplies.length} supply(ies) released successfully`);
     } catch (error) {
-      console.error("Error releasing supplies:", error);
+      // Error handled by toast
       toast.error(error.message || "Failed to release supplies");
     } finally {
       setLoading(false);
@@ -562,15 +539,7 @@ export function ReleaseSupply() {
                               const customIdField = supply.id; // This is the custom ID field from document data
                               const isSelected = selectedSupplies.some(s => s.supplyId === customIdField);
                               
-                              console.log('Supply in dropdown:', {
-                                firestoreDocId: firestoreDocId,
-                                customIdField: customIdField,
-                                name: supply.name,
-                                allFields: Object.keys(supply),
-                                // Check if there are two different 'id' fields
-                                hasCustomId: supply.id !== undefined,
-                                supplyObject: supply
-                              });
+
                               
                               return (
                                 <CommandItem
@@ -579,11 +548,7 @@ export function ReleaseSupply() {
                                     if (isSelected) {
                                       setSelectedSupplies(prev => prev.filter(s => s.supplyId !== customIdField));
                                     } else {
-                                      console.log('Adding supply to selection:', {
-                                        supplyId: customIdField,
-                                        supplyName: supply.name,
-                                        firestoreDocId: firestoreDocId
-                                      });
+
                                       setSelectedSupplies(prev => [...prev, {
                                         supplyId: customIdField, // Use custom ID field for querying
                                         supplyName: supply.name,
@@ -1462,7 +1427,7 @@ export function ReleaseSupply() {
                     release.docId === selectedRelease.docId ? selectedRelease : release
                   ));
                 } catch (error) {
-                  console.error("Error updating release:", error);
+                  // Error handled by toast
                   toast.error("Failed to update release");
                 }
               }}
