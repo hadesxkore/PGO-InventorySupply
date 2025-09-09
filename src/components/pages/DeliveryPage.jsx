@@ -108,6 +108,23 @@ export function DeliveryPage() {
     classification: "" // Add classification field
   });
 
+  // New state for multiple delivery items
+  const [deliveryItems, setDeliveryItems] = useState([]);
+  const [currentItem, setCurrentItem] = useState({
+    supplyId: "",
+    supplyName: "",
+    quantity: "",
+    classification: ""
+  });
+
+  // Draft state
+  const [isDraft, setIsDraft] = useState(false);
+  const [draftData, setDraftData] = useState({
+    deliveryItems: [],
+    deliveredBy: "",
+    notes: ""
+  });
+
   const [editDelivery, setEditDelivery] = useState({
     id: "",
     supplyId: "",
@@ -293,16 +310,123 @@ export function DeliveryPage() {
     setSortOrder(current => current === 'asc' ? 'desc' : 'asc');
   };
 
-  const handleAddDelivery = async (e) => {
-    e.preventDefault();
-    
-    if (!newDelivery.supplyId || !newDelivery.supplyName) {
+  // Add item to delivery list
+  const addItemToList = () => {
+    if (!currentItem.supplyId || !currentItem.supplyName) {
       toast.error("Please select a supply");
       return;
     }
 
-    if (!newDelivery.quantity || parseInt(newDelivery.quantity) <= 0) {
+    if (!currentItem.quantity || parseInt(currentItem.quantity) <= 0) {
       toast.error("Please enter a valid quantity");
+      return;
+    }
+
+    // Check if item already exists
+    const existingItem = deliveryItems.find(item => item.supplyId === currentItem.supplyId);
+    if (existingItem) {
+      toast.error("This supply is already in the delivery list");
+      return;
+    }
+
+    setDeliveryItems([...deliveryItems, { ...currentItem }]);
+    setCurrentItem({
+      supplyId: "",
+      supplyName: "",
+      quantity: "",
+      classification: ""
+    });
+    setCommandInputValue("");
+    setOpen(false);
+    toast.success("Item added to delivery list");
+  };
+
+  // Remove item from delivery list
+  const removeItemFromList = (supplyId) => {
+    setDeliveryItems(deliveryItems.filter(item => item.supplyId !== supplyId));
+  };
+
+  // Update item quantity in list
+  const updateItemQuantity = (supplyId, newQuantity) => {
+    setDeliveryItems(deliveryItems.map(item => 
+      item.supplyId === supplyId ? { ...item, quantity: newQuantity } : item
+    ));
+  };
+
+  // Save draft to localStorage
+  const saveDraft = () => {
+    const draft = {
+      deliveryItems,
+      deliveredBy: newDelivery.deliveredBy,
+      notes: newDelivery.notes,
+      timestamp: new Date().toISOString()
+    };
+    localStorage.setItem('deliveryDraft', JSON.stringify(draft));
+    setIsDraft(true);
+    toast.success("Draft saved successfully");
+  };
+
+  // Load draft from localStorage
+  const loadDraft = () => {
+    const savedDraft = localStorage.getItem('deliveryDraft');
+    if (savedDraft) {
+      try {
+        const draft = JSON.parse(savedDraft);
+        setDeliveryItems(draft.deliveryItems || []);
+        setNewDelivery(prev => ({
+          ...prev,
+          deliveredBy: draft.deliveredBy || "",
+          notes: draft.notes || ""
+        }));
+        setIsDraft(true);
+        toast.success("Draft loaded successfully");
+      } catch (error) {
+        console.error("Error loading draft:", error);
+        toast.error("Failed to load draft");
+      }
+    } else {
+      toast.info("No draft found");
+    }
+  };
+
+  // Clear draft
+  const clearDraft = () => {
+    localStorage.removeItem('deliveryDraft');
+    setIsDraft(false);
+    setDraftData({
+      deliveryItems: [],
+      deliveredBy: "",
+      notes: ""
+    });
+    toast.success("Draft cleared");
+  };
+
+  // Check for existing draft on component mount
+  useEffect(() => {
+    const savedDraft = localStorage.getItem('deliveryDraft');
+    if (savedDraft) {
+      try {
+        const draft = JSON.parse(savedDraft);
+        if (draft.deliveryItems && draft.deliveryItems.length > 0) {
+          setDeliveryItems(draft.deliveryItems);
+          setNewDelivery(prev => ({
+            ...prev,
+            deliveredBy: draft.deliveredBy || "",
+            notes: draft.notes || ""
+          }));
+          setIsDraft(true);
+        }
+      } catch (error) {
+        console.error("Error loading draft on mount:", error);
+      }
+    }
+  }, []);
+
+  const handleAddDelivery = async (e) => {
+    e.preventDefault();
+    
+    if (deliveryItems.length === 0) {
+      toast.error("Please add at least one item to the delivery list");
       return;
     }
 
@@ -316,64 +440,79 @@ export function DeliveryPage() {
     try {
       // Start a Firestore transaction
       await runTransaction(db, async (transaction) => {
-        // Get the supply document using the correct document ID
-        const supplyRef = doc(db, "supplies", newDelivery.supplyId);
-        const supplyDoc = await transaction.get(supplyRef);
-
-        if (!supplyDoc.exists()) {
-          throw new Error("Supply not found. Please refresh and try again.");
-        }
-
-        // Get all deliveries to determine the next ID
+        // First, do all reads
         const deliveriesRef = collection(db, "deliveries");
         const deliveriesQuery = query(deliveriesRef, orderBy("id", "desc"), limit(1));
         const deliveriesSnapshot = await getDocs(deliveriesQuery);
         
-        // Generate the next delivery ID
+        // Generate the starting delivery ID
         let nextNumber = 1;
         if (!deliveriesSnapshot.empty) {
           const lastDelivery = deliveriesSnapshot.docs[0].data();
           const lastNumber = parseInt(lastDelivery.id.split('-')[1]);
           nextNumber = lastNumber + 1;
         }
-        const newDeliveryId = `DLV-${String(nextNumber).padStart(4, '0')}`;
 
-        // Calculate new quantities
-        const currentQuantity = supplyDoc.data().quantity || 0;
-        const currentAvailability = supplyDoc.data().availability || 0;
-        const deliveryQuantity = parseInt(newDelivery.quantity);
-        const newQuantity = currentQuantity + deliveryQuantity;
-        const newAvailability = currentAvailability + deliveryQuantity; // Add to current availability instead of setting equal to total
-
-        // Update supply quantity and classification
-        const updateData = {
-          quantity: newQuantity,
-          availability: newAvailability, // Use the new availability calculation
-          dateUpdated: serverTimestamp()
-        };
-
-        // Only update classification if it's provided and different from current
-        if (newDelivery.classification && 
-            newDelivery.classification !== "N/A" && 
-            newDelivery.classification !== supplyDoc.data().classification) {
-          updateData.classification = newDelivery.classification;
+        // Read all supply documents first
+        const supplyDocs = [];
+        for (let i = 0; i < deliveryItems.length; i++) {
+          const item = deliveryItems[i];
+          const supplyRef = doc(db, "supplies", item.supplyId);
+          const supplyDoc = await transaction.get(supplyRef);
+          
+          if (!supplyDoc.exists()) {
+            throw new Error(`Supply not found: ${item.supplyName}. Please refresh and try again.`);
+          }
+          
+          supplyDocs.push({
+            ref: supplyRef,
+            data: supplyDoc.data(),
+            item: item
+          });
         }
 
-        // Update the supply document
-        transaction.update(supplyRef, updateData);
+        // Now do all writes
+        for (let i = 0; i < supplyDocs.length; i++) {
+          const { ref: supplyRef, data: supplyData, item } = supplyDocs[i];
+          const newDeliveryId = `DLV-${String(nextNumber + i).padStart(4, '0')}`;
 
-        // Add delivery record with the new ID format
-        const deliveryRef = doc(db, "deliveries", newDeliveryId);
-        transaction.set(deliveryRef, {
-          id: newDeliveryId,
-          supplyId: newDelivery.supplyId,
-          supplyName: newDelivery.supplyName,
-          classification: newDelivery.classification || supplyDoc.data().classification || "N/A",
-          quantity: deliveryQuantity,
-          deliveredBy: newDelivery.deliveredBy.trim(),
-          notes: newDelivery.notes.trim(),
-          createdAt: serverTimestamp()
-        });
+          // Calculate new quantities
+          const currentQuantity = supplyData.quantity || 0;
+          const currentAvailability = supplyData.availability || 0;
+          const deliveryQuantity = parseInt(item.quantity);
+          const newQuantity = currentQuantity + deliveryQuantity;
+          const newAvailability = currentAvailability + deliveryQuantity;
+
+          // Update supply quantity and classification
+          const updateData = {
+            quantity: newQuantity,
+            availability: newAvailability,
+            dateUpdated: serverTimestamp()
+          };
+
+          // Only update classification if it's provided and different from current
+          if (item.classification && 
+              item.classification !== "N/A" && 
+              item.classification !== supplyData.classification) {
+            updateData.classification = item.classification;
+          }
+
+          // Update the supply document
+          transaction.update(supplyRef, updateData);
+
+          // Add delivery record
+          const deliveryRef = doc(db, "deliveries", newDeliveryId);
+          transaction.set(deliveryRef, {
+            id: newDeliveryId,
+            supplyId: item.supplyId,
+            supplyName: item.supplyName,
+            classification: item.classification || supplyData.classification || "N/A",
+            quantity: deliveryQuantity,
+            deliveredBy: newDelivery.deliveredBy.trim(),
+            notes: newDelivery.notes.trim(),
+            createdAt: serverTimestamp()
+          });
+        }
       });
 
       setDialogOpen(false);
@@ -385,9 +524,18 @@ export function DeliveryPage() {
         notes: "",
         deliveredBy: ""
       });
+      setDeliveryItems([]);
+      setCurrentItem({
+        supplyId: "",
+        supplyName: "",
+        quantity: "",
+        classification: ""
+      });
       setCommandInputValue("");
       setOpen(false);
-      toast.success("Delivery added successfully");
+      setIsDraft(false);
+      clearDraft(); // Clear the draft after successful submission
+      toast.success(`${deliveryItems.length} delivery items added successfully`);
     } catch (error) {
       console.error("Error adding delivery:", error);
       toast.error(error.message || "Failed to add delivery");
@@ -508,23 +656,49 @@ export function DeliveryPage() {
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-2xl font-bold text-gray-800 dark:text-white">
             Delivery Records
+            {isDraft && (
+              <span className="text-sm font-normal text-orange-600 dark:text-orange-400 ml-2">
+                (Draft Saved)
+              </span>
+            )}
           </h1>
-          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-            <DialogTrigger asChild>
-              <Button size="lg" className="gap-2">
-                <Plus className="w-4 h-4" />
-                Add Delivery
+          <div className="flex items-center gap-3">
+            {isDraft && (
+              <Button
+                variant="outline"
+                onClick={loadDraft}
+                className="gap-2 text-orange-600 border-orange-300 hover:bg-orange-50"
+              >
+                <Package className="w-4 h-4" />
+                Load Draft
               </Button>
-            </DialogTrigger>
+            )}
+            <Button
+              variant="outline"
+              onClick={clearDraft}
+              className="gap-2 text-red-600 border-red-300 hover:bg-red-50"
+            >
+              <Trash2 className="w-4 h-4" />
+              Clear Draft
+            </Button>
+            <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+              <DialogTrigger asChild>
+                <Button size="lg" className="gap-2">
+                  <Plus className="w-4 h-4" />
+                  Add Delivery
+                </Button>
+              </DialogTrigger>
             <DialogContent className="sm:max-w-[900px] p-0">
               <div className="grid grid-cols-5 min-h-[600px]">
-                {/* Left Column - Supply Selection */}
+                {/* Left Column - Supply Selection & Items List */}
                 <div className="col-span-2 bg-slate-50 dark:bg-slate-900/50 p-8 flex flex-col gap-6 border-r border-slate-200 dark:border-slate-800">
                   <div className="flex-1 flex flex-col gap-4">
                     <div className="flex items-center gap-2 mb-2">
                       <Package className="w-5 h-5 text-slate-600 dark:text-slate-400" />
-                      <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-200">Supply Selection</h3>
+                      <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-200">Add Delivery Items</h3>
                     </div>
+                    
+                    {/* Supply Selection */}
                     <div className="space-y-4">
                       <div className="space-y-2">
                         <Label className="text-sm font-medium text-slate-700 dark:text-slate-300">Select Supply</Label>
@@ -536,7 +710,14 @@ export function DeliveryPage() {
                               aria-expanded={open}
                               className="w-full justify-between bg-white dark:bg-slate-900"
                             >
-                              {newDelivery.supplyName || "Select a supply..."}
+                              <div className="flex items-center gap-2">
+                                <span>{currentItem.supplyName || "Select a supply..."}</span>
+                                {currentItem.classification && (
+                                  <span className="text-xs text-blue-600 dark:text-blue-400 font-medium">
+                                    ({currentItem.classification})
+                                  </span>
+                                )}
+                              </div>
                               <span className="ml-2 opacity-50">⌄</span>
                             </Button>
                           </PopoverTrigger>
@@ -554,18 +735,23 @@ export function DeliveryPage() {
                                     key={supply.id}
                                     value={supply.name}
                                     onSelect={() => {
-                                      setNewDelivery({
-                                        ...newDelivery,
-                                        supplyId: supply.docId, // Use docId instead of id
+                                      setCurrentItem({
+                                        supplyId: supply.docId,
                                         supplyName: supply.name,
-                                        classification: supply.classification || "" // Get classification from supply
+                                        classification: supply.classification || "",
+                                        quantity: ""
                                       });
                                       setOpen(false);
                                     }}
                                   >
-                                    <div className="flex items-center gap-2">
-                                      <span>{supply.name}</span>
-                                      <span className="text-sm text-gray-500">({supply.id})</span>
+                                    <div className="flex items-center justify-between w-full">
+                                      <div className="flex items-center gap-2">
+                                        <span>{supply.name}</span>
+                                        <span className="text-sm text-gray-500">({supply.id})</span>
+                                      </div>
+                                      <span className="text-sm text-blue-600 dark:text-blue-400 font-medium">
+                                        {supply.classification || "N/A"}
+                                      </span>
                                     </div>
                                   </CommandItem>
                                 ))}
@@ -576,54 +762,93 @@ export function DeliveryPage() {
                       </div>
 
                       <div className="space-y-2">
-                        <Label className="text-sm font-medium text-slate-700 dark:text-slate-300">Classification</Label>
-                        <Popover open={classificationSearchOpen} onOpenChange={setClassificationSearchOpen}>
-                          <PopoverTrigger asChild>
-                            <Button
-                              variant="outline"
-                              role="combobox"
-                              aria-expanded={classificationSearchOpen}
-                              className="w-full justify-between bg-white dark:bg-slate-900"
-                            >
-                              {newDelivery.classification || "Select a classification..."}
-                              <span className="ml-2 opacity-50">⌄</span>
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-full p-0">
-                            <Command>
-                              <CommandInput
-                                placeholder="Search classification..."
-                                value={classificationSearchQuery}
-                                onValueChange={setClassificationSearchQuery}
-                              />
-                              <CommandEmpty>No classification found.</CommandEmpty>
-                              <CommandGroup className="max-h-[200px] overflow-auto">
-                                {filteredClassifications.map((classification) => (
-                                  <CommandItem
-                                    key={classification.id}
-                                    value={classification.name}
-                                    onSelect={(value) => {
-                                      setNewDelivery({ ...newDelivery, classification: value });
-                                      setClassificationSearchOpen(false);
-                                    }}
-                                  >
-                                    {classification.name}
-                                  </CommandItem>
-                                ))}
-                              </CommandGroup>
-                            </Command>
-                          </PopoverContent>
-                        </Popover>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setNewClassificationDialogOpen(true)}
-                          className="w-full mt-2 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
-                        >
-                          <Plus className="w-4 h-4 mr-1" />
-                          Add New Classification
-                        </Button>
+                        <Label className="text-sm font-medium text-slate-700 dark:text-slate-300">Quantity</Label>
+                        <Input
+                          type="number"
+                          min="1"
+                          className="h-[38px] bg-white dark:bg-slate-900"
+                          value={currentItem.quantity}
+                          onChange={(e) => setCurrentItem({ ...currentItem, quantity: e.target.value })}
+                          placeholder="Enter quantity"
+                        />
+                      </div>
+
+                      <Button
+                        type="button"
+                        onClick={addItemToList}
+                        className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+                        disabled={!currentItem.supplyId || !currentItem.quantity}
+                      >
+                        <Plus className="w-4 h-4 mr-2" />
+                        Add to Delivery List
+                      </Button>
+                    </div>
+
+                    {/* Selected Items List */}
+                    <div className="flex-1 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                          Delivery Items ({deliveryItems.length})
+                        </Label>
+                        {deliveryItems.length > 0 && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setDeliveryItems([])}
+                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                          >
+                            Clear All
+                          </Button>
+                        )}
+                      </div>
+                      
+                      <div className={`overflow-y-auto space-y-2 ${
+                        deliveryItems.length >= 4 
+                          ? 'max-h-[200px] scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600 scrollbar-track-gray-100 dark:scrollbar-track-gray-800 scrollbar-thumb-rounded-full scrollbar-track-rounded-full' 
+                          : 'max-h-[300px]'
+                      }`}>
+                        {deliveryItems.length === 0 ? (
+                          <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                            <Package className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                            <p className="text-sm">No items added yet</p>
+                            <p className="text-xs">Select supplies above to add them</p>
+                          </div>
+                        ) : (
+                          deliveryItems.map((item, index) => (
+                            <div key={item.supplyId} className="bg-white dark:bg-slate-800 rounded-lg p-3 border border-slate-200 dark:border-slate-700">
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium text-slate-900 dark:text-slate-200 truncate">
+                                    {item.supplyName}
+                                  </p>
+                                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                                    {item.classification || "N/A"}
+                                  </p>
+                                </div>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => removeItemFromList(item.supplyId)}
+                                  className="text-red-600 hover:text-red-700 hover:bg-red-50 p-1 h-6 w-6"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </Button>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Label className="text-xs text-slate-600 dark:text-slate-400">Qty:</Label>
+                                <Input
+                                  type="number"
+                                  min="1"
+                                  value={item.quantity}
+                                  onChange={(e) => updateItemQuantity(item.supplyId, e.target.value)}
+                                  className="h-6 w-16 text-xs"
+                                />
+                              </div>
+                            </div>
+                          ))
+                        )}
                       </div>
                     </div>
                   </div>
@@ -632,9 +857,19 @@ export function DeliveryPage() {
                 {/* Right Column - Delivery Details */}
                 <div className="col-span-3 p-8">
                   <DialogHeader className="mb-8">
-                    <DialogTitle className="text-2xl font-bold text-slate-900 dark:text-slate-200">Add New Delivery</DialogTitle>
+                    <DialogTitle className="text-2xl font-bold text-slate-900 dark:text-slate-200">
+                      Add New Delivery
+                      {deliveryItems.length > 0 && (
+                        <span className="text-lg font-normal text-blue-600 dark:text-blue-400 ml-2">
+                          ({deliveryItems.length} items)
+                        </span>
+                      )}
+                    </DialogTitle>
                     <DialogDescription className="text-base text-slate-500 dark:text-slate-400">
-                      Enter the delivery details below
+                      {deliveryItems.length === 0 
+                        ? "Add items from the left panel, then fill in the delivery details below"
+                        : "Review the items and fill in the shared delivery details below"
+                      }
                     </DialogDescription>
                   </DialogHeader>
 
@@ -647,19 +882,6 @@ export function DeliveryPage() {
 
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
-                          <Label className="text-sm font-medium text-slate-700 dark:text-slate-300">Quantity</Label>
-                          <Input
-                            type="number"
-                            min="1"
-                            required
-                            className="h-[38px] bg-white dark:bg-slate-900"
-                            value={newDelivery.quantity}
-                            onChange={(e) => setNewDelivery({ ...newDelivery, quantity: e.target.value })}
-                            placeholder="Enter quantity"
-                          />
-                        </div>
-
-                        <div className="space-y-2">
                           <Label className="text-sm font-medium text-slate-700 dark:text-slate-300">Delivered By</Label>
                           <Input
                             required
@@ -667,6 +889,16 @@ export function DeliveryPage() {
                             value={newDelivery.deliveredBy}
                             onChange={(e) => setNewDelivery({ ...newDelivery, deliveredBy: e.target.value })}
                             placeholder="Enter name"
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label className="text-sm font-medium text-slate-700 dark:text-slate-300">Total Items</Label>
+                          <Input
+                            disabled
+                            className="h-[38px] bg-gray-50 dark:bg-slate-800 text-gray-600 dark:text-gray-400"
+                            value={deliveryItems.length}
+                            placeholder="Add items to see count"
                           />
                         </div>
                       </div>
@@ -677,36 +909,76 @@ export function DeliveryPage() {
                           className="h-[38px] bg-white dark:bg-slate-900"
                           value={newDelivery.notes}
                           onChange={(e) => setNewDelivery({ ...newDelivery, notes: e.target.value })}
-                          placeholder="Add any additional notes"
+                          placeholder="Add any additional notes (applies to all items)"
                         />
                       </div>
+
+                      {/* Summary of items */}
+                      {deliveryItems.length > 0 && (
+                        <div className="space-y-2">
+                          <Label className="text-sm font-medium text-slate-700 dark:text-slate-300">Items Summary</Label>
+                          <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3 max-h-[200px] overflow-y-auto">
+                            <div className="space-y-1">
+                              {deliveryItems.map((item, index) => (
+                                <div key={item.supplyId} className="flex justify-between items-center text-sm">
+                                  <div className="flex flex-col">
+                                    <span className="text-slate-700 dark:text-slate-300">
+                                      {item.supplyName}
+                                    </span>
+                                    <span className="text-xs text-blue-600 dark:text-blue-400">
+                                      {item.classification || "N/A"}
+                                    </span>
+                                  </div>
+                                  <span className="text-blue-600 dark:text-blue-400 font-medium">
+                                    Qty: {item.quantity}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     <div className="pt-6 border-t border-slate-200 dark:border-slate-800">
-                      <Button 
-                        type="submit" 
-                        size="lg" 
-                        className="w-full h-12 text-base font-medium bg-blue-600 hover:bg-blue-700" 
-                        disabled={loading}
-                      >
-                        {loading ? (
-                          <>
-                            <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                            Adding Delivery...
-                          </>
-                        ) : (
-                          <>
-                            <Plus className="w-5 h-5 mr-1" />
-                            Add Delivery
-                          </>
-                        )}
-                      </Button>
+                      <div className="flex gap-3">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="lg"
+                          onClick={saveDraft}
+                          className="flex-1 h-12 text-base font-medium text-orange-600 border-orange-300 hover:bg-orange-50"
+                          disabled={deliveryItems.length === 0}
+                        >
+                          <Package className="w-5 h-5 mr-2" />
+                          Save as Draft
+                        </Button>
+                        <Button 
+                          type="submit" 
+                          size="lg" 
+                          className="flex-1 h-12 text-base font-medium bg-blue-600 hover:bg-blue-700" 
+                          disabled={loading || deliveryItems.length === 0}
+                        >
+                          {loading ? (
+                            <>
+                              <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                              Adding {deliveryItems.length} Delivery Items...
+                            </>
+                          ) : (
+                            <>
+                              <Plus className="w-5 h-5 mr-1" />
+                              Add {deliveryItems.length} Delivery Items
+                            </>
+                          )}
+                        </Button>
+                      </div>
                     </div>
                   </form>
                 </div>
               </div>
             </DialogContent>
           </Dialog>
+          </div>
         </div>
 
         {/* Stats Cards */}
@@ -1043,9 +1315,14 @@ export function DeliveryPage() {
                                   setEditOpen(false);
                                 }}
                               >
-                                <div className="flex items-center gap-2">
-                                  <span>{supply.name}</span>
-                                  <span className="text-sm text-gray-500">({supply.id})</span>
+                                <div className="flex items-center justify-between w-full">
+                                  <div className="flex items-center gap-2">
+                                    <span>{supply.name}</span>
+                                    <span className="text-sm text-gray-500">({supply.id})</span>
+                                  </div>
+                                  <span className="text-sm text-blue-600 dark:text-blue-400 font-medium">
+                                    {supply.classification || "N/A"}
+                                  </span>
                                 </div>
                               </CommandItem>
                             ))}
